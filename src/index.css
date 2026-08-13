@@ -1,0 +1,175 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+
+  /* Neutral studio surfaces, darkest to lightest. */
+  --color-surface-base: #0b0d10;
+  --color-surface-raised: #14171b;
+  --color-surface-overlay: #1c2025;
+  --color-border-subtle: #262b31;
+  --color-border-strong: #343b43;
+
+  --color-text-primary: #e8eaed;
+  --color-text-secondary: #9aa3af;
+  --color-text-tertiary: #636b76;
+
+  /* Single restrained brand accent, used for primary actions and focus states. */
+  --color-accent: #e0a339;
+  --color-accent-strong: #f0b656;
+  --color-accent-muted: #4a3a20;
+
+  /* Silence category colors: cool-to-warm progression signals mild-to-aggressive trimming
+     without reaching for literal traffic-light red/yellow/green. */
+  --color-silence-short: #4fd1c5;
+  --color-silence-medium: #a78bfa;
+  --color-silence-long: #fb7185;
+
+  --color-danger: #ef4444;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-surface-base);
+    color: var(--color-text-primary);
+    font-family: var(--font-sans);
+    font-feature-settings: "tnum" 1, "cv11" 1;
+  }
+
+  ::selection {
+    background-color: var(--color-accent);
+    color: var(--color-surface-base);
+  }
+}
+
+@layer components {
+  /* Native range input, fully restyled via pseudo-elements. --fill-color and --fill-percent are set inline
+     per instance so one rule serves the global amber slider and each category's tinted ones alike. */
+  .range-slider {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    height: 20px;
+    background-color: transparent;
+    background-image: linear-gradient(
+      to right,
+      var(--fill-color) 0%,
+      var(--fill-color) var(--fill-percent),
+      var(--color-surface-overlay) var(--fill-percent),
+      var(--color-surface-overlay) 100%
+    );
+    background-size: 100% 5px;
+    background-position: center;
+    background-repeat: no-repeat;
+    border-radius: 999px;
+    cursor: pointer;
+    outline: none;
+    transition: background-size 200ms ease;
+  }
+  .range-slider:hover {
+    background-size: 100% 7px;
+  }
+  .range-slider:disabled {
+    cursor: not-allowed;
+  }
+
+  .range-slider::-webkit-slider-thumb {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: var(--fill-color);
+    border: 2px solid var(--color-surface-base);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5), 0 0 0 1px color-mix(in srgb, var(--fill-color) 45%, transparent);
+    cursor: pointer;
+    transition: transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .range-slider:hover::-webkit-slider-thumb {
+    transform: scale(1.15);
+  }
+  .range-slider:active::-webkit-slider-thumb {
+    transform: scale(1.3);
+  }
+  .range-slider:disabled::-webkit-slider-thumb {
+    transform: none;
+  }
+
+  .range-slider::-moz-range-track {
+    height: 5px;
+    border-radius: 999px;
+    background: var(--color-surface-overlay);
+    border: none;
+  }
+  .range-slider::-moz-range-progress {
+    height: 5px;
+    border-radius: 999px;
+    background: var(--fill-color);
+  }
+  .range-slider::-moz-range-thumb {
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: var(--fill-color);
+    border: 2px solid var(--color-surface-base);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    transition: transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .range-slider:hover::-moz-range-thumb {
+    transform: scale(1.15);
+  }
+
+  /* Category card hover: lift + a glow tinted from the category's own accent via color-mix, so no color
+     value is ever duplicated between the theme tokens and this rule. --panel-accent is set per instance.
+     Border color is owned entirely by this class (both resting and hover) rather than mixed with a Tailwind
+     utility: utilities are layered after components, so a utility class would always beat a hover override here. */
+  .category-panel {
+    border-color: var(--color-border-subtle);
+    transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1), border-color 320ms ease, box-shadow 320ms ease;
+  }
+  .category-panel:hover {
+    transform: translateY(-4px);
+    border-color: color-mix(in srgb, var(--panel-accent) 45%, var(--color-border-strong));
+    box-shadow: 0 28px 56px -30px color-mix(in srgb, var(--panel-accent) 60%, transparent);
+  }
+
+  .dropzone {
+    border-color: var(--color-border-strong);
+    background-color: var(--color-surface-raised);
+    transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1), border-color 320ms ease, box-shadow 320ms ease, background-color 320ms ease;
+  }
+  .dropzone:hover {
+    transform: translateY(-3px);
+    border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border-strong));
+    box-shadow: 0 32px 64px -34px color-mix(in srgb, var(--color-accent) 45%, transparent);
+  }
+  .dropzone.is-drag-active {
+    transform: translateY(-2px) scale(1.008);
+    border-color: var(--color-accent);
+    background-color: var(--color-surface-overlay);
+    box-shadow: 0 36px 72px -30px color-mix(in srgb, var(--color-accent) 55%, transparent);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes float-icon {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
