@@ -8,10 +8,12 @@ import { encodeMp3 } from '../audio/encodeMp3';
 import { encodeWav } from '../audio/encodeWav';
 import { cascadeMinLengthOrdering } from '../audio/minLengthOrdering';
 import { PreviewPlaybackController } from '../audio/PreviewPlaybackController';
+import { clearPersistedSession, loadPersistedSession, savePersistedSession } from './persistedSession';
 import type { SerializedAmplitudeEnvelope } from '../audio/worker/workerMessages';
 import type { DetectionConfig, ExportAudioFormat, SilenceCategoryKey, SilenceRegion } from '../audio/types';
 
 const REGION_RECOMPUTE_DEBOUNCE_MILLISECONDS = 150;
+const SETTINGS_PERSIST_DEBOUNCE_MILLISECONDS = 300;
 
 export const uploadedFileName = signal<string | null>(null);
 export const isAnalyzingAudio = signal(false);
@@ -28,9 +30,11 @@ export const playbackCurrentTimeSeconds = signal(0);
 
 let activeWorkerClient: AudioAnalysisWorkerClient | null = null;
 let activePlaybackController: PreviewPlaybackController | null = null;
+let activeFile: File | null = null;
 let regionRecomputeTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let settingsPersistTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
-export async function loadAudioFile(file: File): Promise<void> {
+export async function loadAudioFile(file: File, restoredConfig?: DetectionConfig): Promise<void> {
   resetAudioFile();
   errorMessage.value = null;
   isAnalyzingAudio.value = true;
@@ -53,13 +57,17 @@ export async function loadAudioFile(file: File): Promise<void> {
     activeWorkerClient = workerClient;
 
     const { envelope, defaultConfig } = await workerClient.loadAudio(decodedAudio.channelData, decodedAudio.sampleRate);
-    const regions = await workerClient.detectRegions(defaultConfig);
+    const configToUse = restoredConfig ?? defaultConfig;
+    const regions = await workerClient.detectRegions(configToUse);
 
     uploadedFileName.value = file.name;
     amplitudeEnvelope.value = envelope;
-    detectionConfig.value = defaultConfig;
+    detectionConfig.value = configToUse;
     silenceRegions.value = regions;
-    playbackController.updateSegments(regions, defaultConfig);
+    playbackController.updateSegments(regions, configToUse);
+
+    activeFile = file;
+    void savePersistedSession({ fileBlob: file, fileName: file.name, detectionConfig: configToUse, exportFormat: exportFormat.value });
   } catch (caughtError) {
     errorMessage.value = caughtError instanceof Error ? caughtError.message : 'Could not read this audio file.';
     resetAudioFile();
@@ -68,14 +76,46 @@ export async function loadAudioFile(file: File): Promise<void> {
   }
 }
 
+/** Restores a file/settings saved by a previous visit, if any. Call once on app startup. */
+export async function restoreSession(): Promise<void> {
+  const persisted = await loadPersistedSession().catch(() => null);
+  if (!persisted) return;
+
+  exportFormat.value = persisted.exportFormat;
+  const file = new File([persisted.fileBlob], persisted.fileName, { type: persisted.fileBlob.type });
+  await loadAudioFile(file, persisted.detectionConfig);
+}
+
+function scheduleSettingsPersist(): void {
+  if (settingsPersistTimeoutId !== null) clearTimeout(settingsPersistTimeoutId);
+
+  settingsPersistTimeoutId = setTimeout(() => {
+    settingsPersistTimeoutId = null;
+    const config = detectionConfig.value;
+    if (!config || !activeFile) return;
+
+    void savePersistedSession({
+      fileBlob: activeFile,
+      fileName: activeFile.name,
+      detectionConfig: config,
+      exportFormat: exportFormat.value,
+    });
+  }, SETTINGS_PERSIST_DEBOUNCE_MILLISECONDS);
+}
+
 export function resetAudioFile(): void {
   activeWorkerClient?.terminate();
   activeWorkerClient = null;
   activePlaybackController?.dispose();
   activePlaybackController = null;
+  activeFile = null;
   if (regionRecomputeTimeoutId !== null) {
     clearTimeout(regionRecomputeTimeoutId);
     regionRecomputeTimeoutId = null;
+  }
+  if (settingsPersistTimeoutId !== null) {
+    clearTimeout(settingsPersistTimeoutId);
+    settingsPersistTimeoutId = null;
   }
 
   uploadedFileName.value = null;
@@ -85,6 +125,14 @@ export function resetAudioFile(): void {
   errorMessage.value = null;
   isPlaybackPlaying.value = false;
   playbackCurrentTimeSeconds.value = 0;
+}
+
+/** Used by the user-facing "Reset" action: clears in-memory state *and* the persisted session, unlike the
+ * plain `resetAudioFile()` above which also runs internally at the top of every `loadAudioFile()` call and
+ * must not wipe storage that `restoreSession()` is in the middle of reading. */
+export function resetAudioFileAndClearStorage(): void {
+  resetAudioFile();
+  void clearPersistedSession();
 }
 
 function syncPlaybackSegments(): void {
@@ -114,6 +162,7 @@ export function updateVolumeThresholdPercent(volumeThresholdPercent: number): vo
 
   detectionConfig.value = { ...currentConfig, volumeThresholdPercent };
   scheduleRegionRecompute();
+  scheduleSettingsPersist();
 }
 
 export function updateCategoryMinLengthSeconds(category: SilenceCategoryKey, minLengthSeconds: number): void {
@@ -137,6 +186,7 @@ export function updateCategoryMinLengthSeconds(category: SilenceCategoryKey, min
     long: { ...currentConfig.long, minLengthSeconds: recascadedMinLengths.long },
   };
   scheduleRegionRecompute();
+  scheduleSettingsPersist();
 }
 
 export function updateCategoryReplacedLengthSeconds(category: SilenceCategoryKey, replacedLengthSeconds: number): void {
@@ -149,6 +199,7 @@ export function updateCategoryReplacedLengthSeconds(category: SilenceCategoryKey
   };
   // Replaced length doesn't change which regions are detected, only how much of each gets cut/skipped.
   syncPlaybackSegments();
+  scheduleSettingsPersist();
 }
 
 export function updateCategoryAudibleLengthSeconds(category: SilenceCategoryKey, audibleLengthSeconds: number): void {
@@ -160,10 +211,12 @@ export function updateCategoryAudibleLengthSeconds(category: SilenceCategoryKey,
     [category]: { ...currentConfig[category], audibleLengthSeconds },
   };
   scheduleRegionRecompute();
+  scheduleSettingsPersist();
 }
 
 export function setExportFormat(format: ExportAudioFormat): void {
   exportFormat.value = format;
+  scheduleSettingsPersist();
 }
 
 export function togglePlayback(): void {

@@ -1,3 +1,4 @@
+import { useEffect } from 'preact/hooks';
 import { CategoryPanel } from './components/CategoryPanel';
 import { Dropzone } from './components/Dropzone';
 import { ExportBar } from './components/ExportBar';
@@ -19,8 +20,9 @@ import {
   isPlaybackPlaying,
   loadAudioFile,
   playbackCurrentTimeSeconds,
-  resetAudioFile,
+  resetAudioFileAndClearStorage,
   restartPlayback,
+  restoreSession,
   seekPlaybackAndPlay,
   setExportFormat,
   silenceRegions,
@@ -55,6 +57,10 @@ function handleDownload(): void {
 }
 
 export function App() {
+  useEffect(() => {
+    void restoreSession();
+  }, []);
+
   const fileName = uploadedFileName.value;
   const isAnalyzing = isAnalyzingAudio.value;
   const envelope = amplitudeEnvelope.value;
@@ -66,9 +72,10 @@ export function App() {
       <Header />
 
       <main class="mx-auto max-w-5xl px-6 pb-10">
+        <Hero />
+
         {!isFileLoaded && (
           <div class="flex flex-col gap-4">
-            <Hero />
             <div style={fadeUpEntranceStyle(1)}>
               <Dropzone onFileSelected={handleFileSelected} disabled={isAnalyzing} />
             </div>
@@ -123,7 +130,7 @@ export function App() {
                 exportFormat={exportFormat.value}
                 onExportFormatChange={setExportFormat}
                 onDownload={handleDownload}
-                onReset={resetAudioFile}
+                onReset={resetAudioFileAndClearStorage}
                 isExporting={isExportingAudio.value}
                 errorMessage={errorMessage.value}
               />
