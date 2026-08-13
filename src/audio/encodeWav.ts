@@ -1,6 +1,11 @@
 const BYTES_PER_SAMPLE = 2;
 const WAV_HEADER_SIZE_BYTES = 44;
 
+/** Every real browser/CPU today is little-endian; detected once so the hot interleave loop below can write
+    through a plain Int16Array (much faster than a DataView call per sample) whenever that holds, falling back
+    to the byte-exact DataView path otherwise so output is correct regardless of host endianness. */
+const IS_LITTLE_ENDIAN_HOST = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+
 function writeAsciiString(view: DataView, byteOffset: number, value: string): void {
   for (let index = 0; index < value.length; index++) {
     view.setUint8(byteOffset + index, value.charCodeAt(index));
@@ -39,11 +44,21 @@ export function encodeWav(channelData: Float32Array<ArrayBuffer>[], sampleRate: 
   writeAsciiString(view, 36, 'data');
   view.setUint32(40, dataSizeBytes, true);
 
-  let byteOffset = WAV_HEADER_SIZE_BYTES;
-  for (let frame = 0; frame < numberOfFrames; frame++) {
-    for (let channelIndex = 0; channelIndex < numberOfChannels; channelIndex++) {
-      view.setInt16(byteOffset, floatSampleToInt16(channelData[channelIndex][frame]), true);
-      byteOffset += BYTES_PER_SAMPLE;
+  if (IS_LITTLE_ENDIAN_HOST) {
+    const interleavedSamples = new Int16Array(arrayBuffer, WAV_HEADER_SIZE_BYTES, numberOfFrames * numberOfChannels);
+    let sampleIndex = 0;
+    for (let frame = 0; frame < numberOfFrames; frame++) {
+      for (let channelIndex = 0; channelIndex < numberOfChannels; channelIndex++) {
+        interleavedSamples[sampleIndex++] = floatSampleToInt16(channelData[channelIndex][frame]);
+      }
+    }
+  } else {
+    let byteOffset = WAV_HEADER_SIZE_BYTES;
+    for (let frame = 0; frame < numberOfFrames; frame++) {
+      for (let channelIndex = 0; channelIndex < numberOfChannels; channelIndex++) {
+        view.setInt16(byteOffset, floatSampleToInt16(channelData[channelIndex][frame]), true);
+        byteOffset += BYTES_PER_SAMPLE;
+      }
     }
   }
 

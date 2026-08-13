@@ -48,40 +48,56 @@ function mergeBriefAudioIntoSurroundingSilence(
   const mergedRuns: MergeableSilenceRun[] = runs.map(run => ({ ...run, swallowedAudioRunCount: 0 }));
   const strayAmplitudeCeiling = Math.min(amplitudeThreshold * STRAY_SOUND_AMPLITUDE_MULTIPLIER, envelope.peakAmplitude);
 
-  let foundMerge = true;
-  while (foundMerge) {
-    foundMerge = false;
-
-    for (let index = 1; index < mergedRuns.length - 1; index++) {
-      const audioRun = mergedRuns[index];
-      const precedingSilence = mergedRuns[index - 1];
-      const followingSilence = mergedRuns[index + 1];
-      if (audioRun.isSilent || !precedingSilence.isSilent || !followingSilence.isSilent) continue;
-
-      const swallowedAudioRunCount = precedingSilence.swallowedAudioRunCount + followingSilence.swallowedAudioRunCount + 1;
-      if (swallowedAudioRunCount > MAX_SWALLOWED_AUDIO_RUNS_PER_ISLAND) continue;
-
-      const mergedDurationSeconds = silenceRunDurationSeconds(
-        { isSilent: true, startWindowIndex: precedingSilence.startWindowIndex, endWindowIndex: followingSilence.endWindowIndex },
-        windowSizeSeconds,
-      );
-      const provisionalCategory = classifyDurationIntoCategory(mergedDurationSeconds, config);
-      if (provisionalCategory === null) continue;
-
-      const audioRunDurationSeconds = silenceRunDurationSeconds(audioRun, windowSizeSeconds);
-      if (audioRunDurationSeconds >= config[provisionalCategory].audibleLengthSeconds) continue;
-
-      if (peakRootMeanSquareInRun(audioRun, envelope) >= strayAmplitudeCeiling) continue;
-
-      mergedRuns.splice(index - 1, 3, {
-        isSilent: true,
-        startWindowIndex: precedingSilence.startWindowIndex,
-        endWindowIndex: followingSilence.endWindowIndex,
-        swallowedAudioRunCount,
-      });
-      foundMerge = true;
-      break;
+  // A single forward pass with a local backtrack: merging a run can only create a new merge
+  // opportunity immediately to its left (the run that's now adjacent to the freshly-merged
+  // silence), never further away, so re-scanning the whole array from scratch after every merge
+  // (as a naive fixed-point loop would) is unnecessary and quadratic. Backing up by one index
+  // after each merge still explores every cascade a full restart would, just without redoing
+  // already-settled work — same result, near-linear instead of O(n^2).
+  let index = 1;
+  while (index < mergedRuns.length - 1) {
+    const audioRun = mergedRuns[index];
+    const precedingSilence = mergedRuns[index - 1];
+    const followingSilence = mergedRuns[index + 1];
+    if (audioRun.isSilent || !precedingSilence.isSilent || !followingSilence.isSilent) {
+      index++;
+      continue;
     }
+
+    const swallowedAudioRunCount = precedingSilence.swallowedAudioRunCount + followingSilence.swallowedAudioRunCount + 1;
+    if (swallowedAudioRunCount > MAX_SWALLOWED_AUDIO_RUNS_PER_ISLAND) {
+      index++;
+      continue;
+    }
+
+    const mergedDurationSeconds = silenceRunDurationSeconds(
+      { isSilent: true, startWindowIndex: precedingSilence.startWindowIndex, endWindowIndex: followingSilence.endWindowIndex },
+      windowSizeSeconds,
+    );
+    const provisionalCategory = classifyDurationIntoCategory(mergedDurationSeconds, config);
+    if (provisionalCategory === null) {
+      index++;
+      continue;
+    }
+
+    const audioRunDurationSeconds = silenceRunDurationSeconds(audioRun, windowSizeSeconds);
+    if (audioRunDurationSeconds >= config[provisionalCategory].audibleLengthSeconds) {
+      index++;
+      continue;
+    }
+
+    if (peakRootMeanSquareInRun(audioRun, envelope) >= strayAmplitudeCeiling) {
+      index++;
+      continue;
+    }
+
+    mergedRuns.splice(index - 1, 3, {
+      isSilent: true,
+      startWindowIndex: precedingSilence.startWindowIndex,
+      endWindowIndex: followingSilence.endWindowIndex,
+      swallowedAudioRunCount,
+    });
+    index = Math.max(1, index - 1);
   }
 
   return mergedRuns;

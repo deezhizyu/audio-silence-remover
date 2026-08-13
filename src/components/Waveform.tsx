@@ -145,6 +145,15 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
   const [hoverState, setHoverState] = useState<{ pixelX: number; seconds: number } | null>(null);
   const hoverStateRef = useRef<{ pixelX: number; seconds: number } | null>(null);
 
+  // The app ships one static theme (no dark/light toggle), so these CSS custom-property lookups never
+  // change after first read — resolving them lazily once and caching here avoids re-running
+  // `getComputedStyle` on every single mousemove while the hover magnifier is open.
+  const themeColorsRef = useRef<ThemeColors | null>(null);
+  const getThemeColors = (referenceElement: Element): ThemeColors => {
+    if (!themeColorsRef.current) themeColorsRef.current = resolveThemeColors(referenceElement);
+    return themeColorsRef.current;
+  };
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -169,15 +178,29 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
         endSeconds: envelope.durationSeconds,
         envelope,
         regions,
-        themeColors: resolveThemeColors(canvas),
+        themeColors: getThemeColors(canvas),
       });
     };
 
     drawWaveform();
 
-    const resizeObserver = new ResizeObserver(drawWaveform);
+    // Coalesced to one redraw per animation frame: a burst of ResizeObserver callbacks (e.g. dragging a
+    // window edge) would otherwise redraw the full waveform once per callback instead of once per frame.
+    let resizeAnimationFrameId: number | null = null;
+    const scheduleRedraw = () => {
+      if (resizeAnimationFrameId !== null) return;
+      resizeAnimationFrameId = requestAnimationFrame(() => {
+        resizeAnimationFrameId = null;
+        drawWaveform();
+      });
+    };
+
+    const resizeObserver = new ResizeObserver(scheduleRedraw);
     resizeObserver.observe(container);
-    return () => resizeObserver.disconnect();
+    return () => {
+      resizeObserver.disconnect();
+      if (resizeAnimationFrameId !== null) cancelAnimationFrame(resizeAnimationFrameId);
+    };
   }, [envelope, regions]);
 
   // The magnifier canvas has a fixed on-screen size, so it only needs its device-pixel backing store set up
@@ -209,7 +232,7 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
     const windowEndPixel = Math.min(widthPixels, pixelX + MAGNIFIER_RADIUS_PIXELS);
     const startSeconds = (windowStartPixel / widthPixels) * envelope.durationSeconds;
     const endSeconds = (windowEndPixel / widthPixels) * envelope.durationSeconds;
-    const themeColors = resolveThemeColors(magnifierCanvas!);
+    const themeColors = getThemeColors(magnifierCanvas!);
 
     drawWaveformSlice(context, {
       widthPixels: MAGNIFIER_WIDTH_PIXELS,
@@ -256,18 +279,45 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
     onSeek(secondsAtPixel(event.offsetX));
   };
 
+  // Native mousemove can fire well above the display's refresh rate; coalescing to one update per
+  // animation frame (keeping only the latest position) avoids redundant state updates and magnifier
+  // redraws without changing what ends up on screen.
+  const pendingHoverPositionRef = useRef<{ pixelX: number; seconds: number } | null>(null);
+  const hoverAnimationFrameIdRef = useRef<number | null>(null);
+
+  const flushPendingHover = () => {
+    hoverAnimationFrameIdRef.current = null;
+    const pending = pendingHoverPositionRef.current;
+    if (!pending) return;
+    hoverStateRef.current = pending;
+    setHoverState(pending);
+    drawMagnifier(pending.pixelX, pending.seconds);
+  };
+
   const handleMouseMove = (event: JSX.TargetedMouseEvent<HTMLDivElement>) => {
     const pixelX = event.offsetX;
     const seconds = secondsAtPixel(pixelX);
-    hoverStateRef.current = { pixelX, seconds };
-    setHoverState({ pixelX, seconds });
-    drawMagnifier(pixelX, seconds);
+    pendingHoverPositionRef.current = { pixelX, seconds };
+    if (hoverAnimationFrameIdRef.current === null) {
+      hoverAnimationFrameIdRef.current = requestAnimationFrame(flushPendingHover);
+    }
   };
 
   const handleMouseLeave = () => {
+    if (hoverAnimationFrameIdRef.current !== null) {
+      cancelAnimationFrame(hoverAnimationFrameIdRef.current);
+      hoverAnimationFrameIdRef.current = null;
+    }
+    pendingHoverPositionRef.current = null;
     hoverStateRef.current = null;
     setHoverState(null);
   };
+
+  useEffect(() => {
+    return () => {
+      if (hoverAnimationFrameIdRef.current !== null) cancelAnimationFrame(hoverAnimationFrameIdRef.current);
+    };
+  }, []);
 
   // Keeps the magnifier's play cursor moving while the file is playing and the magnifier stays open, instead
   // of only updating on the next mouse move.

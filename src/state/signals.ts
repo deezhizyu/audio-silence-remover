@@ -42,8 +42,14 @@ export async function loadAudioFile(file: File, restoredConfig?: DetectionConfig
   try {
     const decodedAudio = await decodeAudioFile(file);
 
-    // Built before handing channelData off to the worker: `workerClient.loadAudio` transfers (detaches) those
-    // buffers, but the AudioBuffer already owns its own independent copy at that point.
+    // Constructed before the (synchronous, main-thread) AudioBuffer copy below so the worker's module
+    // fetch/compile + startup overlaps with that copy instead of waiting for it. Safe because construction
+    // alone never touches `decodedAudio.channelData` — only `workerClient.loadAudio(...)` transfers
+    // (detaches) those buffers, and that call stays below the AudioBuffer copy, which by then already owns
+    // its own independent copy of the samples.
+    const workerClient = new AudioAnalysisWorkerClient();
+    activeWorkerClient = workerClient;
+
     const playbackController = new PreviewPlaybackController(buildAudioBufferFromChannels(decodedAudio.channelData, decodedAudio.sampleRate));
     playbackController.onTimeUpdate = seconds => {
       playbackCurrentTimeSeconds.value = seconds;
@@ -52,9 +58,6 @@ export async function loadAudioFile(file: File, restoredConfig?: DetectionConfig
       isPlaybackPlaying.value = playing;
     };
     activePlaybackController = playbackController;
-
-    const workerClient = new AudioAnalysisWorkerClient();
-    activeWorkerClient = workerClient;
 
     const { envelope, defaultConfig } = await workerClient.loadAudio(decodedAudio.channelData, decodedAudio.sampleRate);
     const configToUse = restoredConfig ?? defaultConfig;
