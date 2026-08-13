@@ -20,11 +20,6 @@ export function PlaybackControls({
 
   return (
     <div class="flex items-center justify-between">
-      <span class="font-mono text-xs tabular-nums text-text-secondary">
-        {formatDurationClock(currentTimeSecondsSignal.value)}
-        <span class="text-text-tertiary"> / {formatDurationClock(durationSeconds)}</span>
-      </span>
-
       <div class="flex items-center gap-1.5">
         <button
           type="button"
@@ -47,9 +42,12 @@ export function PlaybackControls({
           <svg
             viewBox="0 0 20 20"
             fill="currentColor"
-            class={`absolute h-4 w-4 translate-x-px transition-all duration-200 ${isPlaying ? 'scale-50 opacity-0' : 'scale-100 opacity-100'}`}
+            class={`absolute h-4 w-4 translate-x-[-0.5px] transition-all duration-200 ${isPlaying ? 'scale-50 opacity-0' : 'scale-100 opacity-100'}`}
           >
-            <path d="M6.5 4.3a1 1 0 0 1 1.5-.87l9 5.7a1 1 0 0 1 0 1.74l-9 5.7a1 1 0 0 1-1.5-.87V4.3Z" />
+            <path
+              d="M6.5 4.3a1 1 0 0 1 1.5-.87l9 5.7a1 1 0 0 1 0 1.74l-9 5.7a1 1 0 0 1-1.5-.87V4.3Z"
+              transform="translate(10 10) scale(0.72) translate(-10 -10)"
+            />
           </svg>
           <svg
             viewBox="0 0 20 20"
@@ -60,6 +58,11 @@ export function PlaybackControls({
           </svg>
         </button>
       </div>
+
+      <span class="font-mono text-xs tabular-nums text-text-secondary">
+        {formatDurationClock(currentTimeSecondsSignal.value)}
+        <span class="text-text-tertiary"> / {formatDurationClock(durationSeconds)}</span>
+      </span>
     </div>
   );
 }

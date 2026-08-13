@@ -28,7 +28,7 @@ function FloatingBadge({ class: className, rotation, children }: { class: string
 
 export function Hero() {
   return (
-    <section class="relative mx-auto max-w-2xl px-6 pb-12 pt-14 text-center">
+    <section class="relative mx-auto mt-6 max-w-2xl px-6 pb-12 pt-14 text-center">
       <FloatingBadge class="-left-2 top-2" rotation={-8}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="h-5 w-5">
           <path stroke-linecap="round" d="M3 12h2l2-7 3 14 3-11 2 4h6" />
@@ -43,7 +43,9 @@ export function Hero() {
 
       <h1 class="text-4xl font-bold tracking-tight text-text-primary sm:text-5xl">
         Remove silence,
-        <span class="block font-serif text-3xl font-normal italic text-accent sm:text-4xl">your way.</span>
+        <span class="block font-serif text-3xl font-normal italic text-accent sm:text-4xl [text-shadow:0_4px_14px_color-mix(in_srgb,var(--color-accent)_45%,transparent)]">
+          your way.
+        </span>
       </h1>
 
       <p class="mx-auto mt-5 max-w-lg text-sm leading-relaxed text-text-secondary sm:text-base">
