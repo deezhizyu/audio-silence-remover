@@ -5,6 +5,7 @@ import type { SerializedAmplitudeEnvelope } from '../audio/worker/workerMessages
 import { SILENCE_CATEGORY_KEYS, type SilenceCategoryKey, type SilenceRegion } from '../audio/types';
 import { SILENCE_CATEGORY_COLOR_VARS } from './silenceCategoryPresentation';
 import { formatDurationClock } from '../utils/formatNumbers';
+import { clampNumber } from '../utils/clampNumber';
 
 interface WaveformProps {
   envelope: SerializedAmplitudeEnvelope;
@@ -18,11 +19,13 @@ const SILENCE_OVERLAY_ALPHA = 0.3;
 const REGION_BOUNDARY_ALPHA = 0.9;
 
 const MAGNIFIER_WIDTH_PIXELS = 260;
+const MAGNIFIER_WIDE_WIDTH_PIXELS = 340; // +80px, applied from the `xl` breakpoint up
+const MAGNIFIER_WIDE_BREAKPOINT_QUERY = '(min-width: 1280px)'; // Tailwind's `xl` breakpoint
 const MAGNIFIER_HEIGHT_PIXELS = 96;
 // How far to either side of the hovered position (in main-canvas CSS pixels) the magnifier zooms into —
 // deliberately screen-space rather than duration-based, so it stays "a little to the left/right of the
 // cursor" regardless of how long the file is.
-const MAGNIFIER_RADIUS_PIXELS = 70;
+const MAGNIFIER_RADIUS_PIXELS = 35;
 
 interface ThemeColors {
   waveform: string;
@@ -154,6 +157,15 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
     return themeColorsRef.current;
   };
 
+  const [isWideScreen, setIsWideScreen] = useState(() => window.matchMedia(MAGNIFIER_WIDE_BREAKPOINT_QUERY).matches);
+  useEffect(() => {
+    const mediaQueryList = window.matchMedia(MAGNIFIER_WIDE_BREAKPOINT_QUERY);
+    const handleChange = () => setIsWideScreen(mediaQueryList.matches);
+    mediaQueryList.addEventListener('change', handleChange);
+    return () => mediaQueryList.removeEventListener('change', handleChange);
+  }, []);
+  const magnifierWidthPixels = isWideScreen ? MAGNIFIER_WIDE_WIDTH_PIXELS : MAGNIFIER_WIDTH_PIXELS;
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -203,19 +215,20 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
     };
   }, [envelope, regions]);
 
-  // The magnifier canvas has a fixed on-screen size, so it only needs its device-pixel backing store set up
-  // once — subsequent draws just redraw its (unchanging) physical dimensions.
+  // The magnifier canvas has a fixed on-screen size aside from the responsive width breakpoint above, so its
+  // device-pixel backing store only needs setting up when that width changes — subsequent draws just redraw
+  // its (otherwise unchanging) physical dimensions.
   useEffect(() => {
     const canvas = magnifierCanvasRef.current;
     if (!canvas) return;
     const devicePixelRatio = window.devicePixelRatio || 1;
-    canvas.width = MAGNIFIER_WIDTH_PIXELS * devicePixelRatio;
+    canvas.width = magnifierWidthPixels * devicePixelRatio;
     canvas.height = MAGNIFIER_HEIGHT_PIXELS * devicePixelRatio;
-    canvas.style.width = `${MAGNIFIER_WIDTH_PIXELS}px`;
+    canvas.style.width = `${magnifierWidthPixels}px`;
     canvas.style.height = `${MAGNIFIER_HEIGHT_PIXELS}px`;
     const context = canvas.getContext('2d');
     context?.scale(devicePixelRatio, devicePixelRatio);
-  }, []);
+  }, [magnifierWidthPixels]);
 
   const secondsAtPixel = (pixelX: number): number => {
     const widthPixels = containerRef.current?.clientWidth ?? 1;
@@ -228,14 +241,19 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
     if (!context) return;
 
     const widthPixels = Math.max(1, containerRef.current?.clientWidth ?? 1);
-    const windowStartPixel = Math.max(0, pixelX - MAGNIFIER_RADIUS_PIXELS);
-    const windowEndPixel = Math.min(widthPixels, pixelX + MAGNIFIER_RADIUS_PIXELS);
+    // Window width stays fixed at 2x the radius (the zoom level), and only its position is clamped to the
+    // waveform's bounds — clamping each edge independently instead would crop the window near the start/end,
+    // shrinking the time span shown while it's still stretched across the same magnifier canvas, i.e. zooming
+    // in further than everywhere else.
+    const windowWidthPixels = Math.min(MAGNIFIER_RADIUS_PIXELS * 2, widthPixels);
+    const windowStartPixel = clampNumber(pixelX - MAGNIFIER_RADIUS_PIXELS, 0, widthPixels - windowWidthPixels);
+    const windowEndPixel = windowStartPixel + windowWidthPixels;
     const startSeconds = (windowStartPixel / widthPixels) * envelope.durationSeconds;
     const endSeconds = (windowEndPixel / widthPixels) * envelope.durationSeconds;
     const themeColors = getThemeColors(magnifierCanvas!);
 
     drawWaveformSlice(context, {
-      widthPixels: MAGNIFIER_WIDTH_PIXELS,
+      widthPixels: magnifierWidthPixels,
       heightPixels: MAGNIFIER_HEIGHT_PIXELS,
       startSeconds,
       endSeconds,
@@ -247,7 +265,7 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
     const windowDurationSeconds = Math.max(endSeconds - startSeconds, 1e-6);
 
     // Dim hover marker: exactly where the cursor is pointing.
-    const markerX = ((seconds - startSeconds) / windowDurationSeconds) * MAGNIFIER_WIDTH_PIXELS;
+    const markerX = ((seconds - startSeconds) / windowDurationSeconds) * magnifierWidthPixels;
     context.strokeStyle = themeColors.playhead;
     context.lineWidth = 1;
     context.globalAlpha = 0.35;
@@ -261,7 +279,7 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
     // the main waveform's PlayheadLine so it reads as "the same cursor, zoomed in" rather than a new element.
     const currentPlaySeconds = currentTimeSecondsSignal.value;
     if (currentPlaySeconds >= startSeconds && currentPlaySeconds <= endSeconds) {
-      const cursorX = ((currentPlaySeconds - startSeconds) / windowDurationSeconds) * MAGNIFIER_WIDTH_PIXELS;
+      const cursorX = ((currentPlaySeconds - startSeconds) / windowDurationSeconds) * magnifierWidthPixels;
       context.save();
       context.shadowColor = 'rgba(255, 255, 255, 0.55)';
       context.shadowBlur = 6;
@@ -313,6 +331,43 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
     setHoverState(null);
   };
 
+  // Touch is a press-and-hold-to-scrub gesture rather than a tap-to-seek one: touchstart/touchmove only open
+  // the magnifier and track the finger (mirroring hover), and the seek+play only fires once on release — so
+  // holding a finger down to preview a position never starts playback from wherever the press began.
+  const updateHoverFromClientX = (clientX: number) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const pixelX = clampNumber(clientX - rect.left, 0, rect.width);
+    const seconds = secondsAtPixel(pixelX);
+    pendingHoverPositionRef.current = { pixelX, seconds };
+    if (hoverAnimationFrameIdRef.current === null) {
+      hoverAnimationFrameIdRef.current = requestAnimationFrame(flushPendingHover);
+    }
+  };
+
+  const handleTouchStart = (event: JSX.TargetedTouchEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const touch = event.touches[0];
+    if (touch) updateHoverFromClientX(touch.clientX);
+  };
+
+  const handleTouchMove = (event: JSX.TargetedTouchEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const touch = event.touches[0];
+    if (touch) updateHoverFromClientX(touch.clientX);
+  };
+
+  const handleTouchEnd = (event: JSX.TargetedTouchEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const finalHover = hoverStateRef.current;
+    handleMouseLeave();
+    if (finalHover) onSeek(finalHover.seconds);
+  };
+
+  const handleTouchCancel = () => {
+    handleMouseLeave();
+  };
+
   useEffect(() => {
     return () => {
       if (hoverAnimationFrameIdRef.current !== null) cancelAnimationFrame(hoverAnimationFrameIdRef.current);
@@ -326,11 +381,11 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
       void currentTimeSecondsSignal.value;
       if (hoverStateRef.current) drawMagnifier(hoverStateRef.current.pixelX, hoverStateRef.current.seconds);
     });
-  }, [envelope, regions]);
+  }, [envelope, regions, magnifierWidthPixels]);
 
   const containerWidth = containerRef.current?.clientWidth ?? 0;
   const magnifierLeft = hoverState
-    ? Math.min(Math.max(hoverState.pixelX, MAGNIFIER_WIDTH_PIXELS / 2), Math.max(containerWidth - MAGNIFIER_WIDTH_PIXELS / 2, MAGNIFIER_WIDTH_PIXELS / 2))
+    ? Math.min(Math.max(hoverState.pixelX, magnifierWidthPixels / 2), Math.max(containerWidth - magnifierWidthPixels / 2, magnifierWidthPixels / 2))
     : containerWidth / 2;
 
   return (
@@ -339,7 +394,11 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
       onClick={handleClick}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      class="group relative w-full cursor-pointer overflow-visible rounded-lg border border-border-subtle bg-surface-raised transition-colors duration-200 hover:border-border-strong"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchCancel}
+      class="group relative w-full touch-none cursor-pointer overflow-visible rounded-lg border border-border-subtle bg-surface-raised transition-colors duration-200 hover:border-border-strong"
     >
       <div class="overflow-hidden rounded-lg">
         <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: `${WAVEFORM_HEIGHT_PIXELS}px` }} />
@@ -358,10 +417,10 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
       </div>
 
       <div
-        class={`pointer-events-none absolute z-20 -translate-x-1/2 overflow-hidden rounded-lg border border-border-strong bg-surface-overlay shadow-[0_16px_32px_-18px_rgba(0,0,0,0.6)] transition-all duration-150 ease-out ${
-          hoverState ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
+        class={`pointer-events-none absolute z-20 origin-bottom -translate-x-1/2 overflow-hidden rounded-lg border border-border-strong bg-surface-overlay shadow-[0_16px_32px_-18px_rgba(0,0,0,0.6)] transition duration-150 ease-out ${
+          hoverState ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-1 scale-95 opacity-0'
         }`}
-        style={{ left: `${magnifierLeft}px`, bottom: `calc(100% + 10px)`, width: MAGNIFIER_WIDTH_PIXELS, height: MAGNIFIER_HEIGHT_PIXELS }}
+        style={{ left: `${magnifierLeft}px`, bottom: `calc(100% + 10px)`, width: magnifierWidthPixels, height: MAGNIFIER_HEIGHT_PIXELS }}
       >
         <canvas ref={magnifierCanvasRef} style={{ display: 'block', width: '100%', height: '100%' }} />
       </div>
