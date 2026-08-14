@@ -1,7 +1,7 @@
 import type { AmplitudeEnvelope } from './computeAmplitudeEnvelope';
 import { clampNumber } from '../utils/clampNumber';
 import { runLengthEncodeSilence, silenceRunDurationSeconds } from './runLengthEncodeSilence';
-import type { DetectionConfig, SilenceCategoryKey } from './types';
+import type { DetectionConfig } from './types';
 
 const MINIMUM_SHORT_LENGTH_SECONDS = 0.2;
 const VOLUME_THRESHOLD_PERCENTILE = 0.2;
@@ -10,11 +10,8 @@ const MEDIUM_LONG_BOUNDARY_PERCENTILE = 0.66;
 const MINIMUM_VOLUME_THRESHOLD_PERCENT = 1;
 const MAXIMUM_VOLUME_THRESHOLD_PERCENT = 50;
 const DEFAULT_AUDIBLE_LENGTH_SECONDS = 0.2;
-const DEFAULT_REPLACED_LENGTH_SECONDS: Record<SilenceCategoryKey, number> = {
-  short: 0.15,
-  medium: 0.3,
-  long: 0.5,
-};
+/** Auto-detected "replaced with" length is half of the category's own auto-detected minimum length. */
+const REPLACED_LENGTH_MIN_LENGTH_RATIO = 0.5;
 
 function valueAtPercentile(sortedAscendingValues: Float32Array<ArrayBuffer> | number[], fraction: number): number {
   if (sortedAscendingValues.length === 0) return 0;
@@ -59,17 +56,17 @@ export function computeDefaultDetectionConfig(envelope: AmplitudeEnvelope): Dete
     volumeThresholdPercent,
     short: {
       minLengthSeconds: shortMinLengthSeconds,
-      replacedLengthSeconds: DEFAULT_REPLACED_LENGTH_SECONDS.short,
+      replacedLengthSeconds: shortMinLengthSeconds * REPLACED_LENGTH_MIN_LENGTH_RATIO,
       audibleLengthSeconds: DEFAULT_AUDIBLE_LENGTH_SECONDS,
     },
     medium: {
       minLengthSeconds: mediumMinLengthSeconds,
-      replacedLengthSeconds: DEFAULT_REPLACED_LENGTH_SECONDS.medium,
+      replacedLengthSeconds: mediumMinLengthSeconds * REPLACED_LENGTH_MIN_LENGTH_RATIO,
       audibleLengthSeconds: DEFAULT_AUDIBLE_LENGTH_SECONDS,
     },
     long: {
       minLengthSeconds: longMinLengthSeconds,
-      replacedLengthSeconds: DEFAULT_REPLACED_LENGTH_SECONDS.long,
+      replacedLengthSeconds: longMinLengthSeconds * REPLACED_LENGTH_MIN_LENGTH_RATIO,
       audibleLengthSeconds: DEFAULT_AUDIBLE_LENGTH_SECONDS,
     },
   };
