@@ -39,7 +39,7 @@ export function PlaybackControls({
           type="button"
           onClick={onTogglePlayback}
           aria-label={isPlaying ? 'Pause' : 'Play'}
-          class="relative flex h-10 w-10 items-center justify-center rounded-full bg-accent text-surface-base shadow-[0_10px_24px_-10px_var(--color-accent)] transition-transform duration-200 ease-out hover:scale-105 active:scale-95"
+          class="relative flex h-10 w-10 items-center justify-center rounded-full bg-accent text-surface-base shadow-[0_6px_16px_-12px_color-mix(in_srgb,var(--color-accent)_45%,transparent)] outline-none transition-transform duration-200 ease-out hover:scale-105 active:scale-95"
         >
           <svg
             viewBox="0 0 20 20"

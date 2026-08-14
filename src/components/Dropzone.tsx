@@ -58,12 +58,7 @@ export function Dropzone({ onFileSelected, disabled = false }: DropzoneProps) {
         <p class="mt-1 text-xs text-text-tertiary">or choose a file — everything runs on this device, nothing is uploaded</p>
       </div>
 
-      <Button
-        variant="primary"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={disabled}
-        style={{ boxShadow: '0 6px 16px -12px color-mix(in srgb, var(--color-accent) 45%, transparent)' }}
-      >
+      <Button variant="primary" onClick={() => fileInputRef.current?.click()} disabled={disabled}>
         Choose file
       </Button>
       <input ref={fileInputRef} type="file" accept="audio/*" class="hidden" onChange={handleFileInputChange} disabled={disabled} />

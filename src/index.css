@@ -132,7 +132,7 @@
   .category-panel:hover {
     transform: translateY(-4px);
     border-color: color-mix(in srgb, var(--panel-accent) 45%, var(--color-border-strong));
-    box-shadow: 0 28px 56px -30px color-mix(in srgb, var(--panel-accent) 60%, transparent);
+    box-shadow: 0 16px 32px -28px color-mix(in srgb, var(--panel-accent) 45%, transparent);
   }
 
   .dropzone {

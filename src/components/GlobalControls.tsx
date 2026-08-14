@@ -12,7 +12,7 @@ export function GlobalControls({ volumeThresholdPercent, onVolumeThresholdChange
     <Card>
       <SectionHeading
         title="Silence volume"
-        description="Audio quieter than this share of the file's peak volume counts as silence."
+        description="Audio quieter than this threshold of the file's peak volume counts as silence."
       />
       <div class="mt-4">
         <RangeControl
