@@ -27,6 +27,8 @@ export const exportFormat = signal<ExportAudioFormat>('wav');
 
 export const isPlaybackPlaying = signal(false);
 export const playbackCurrentTimeSeconds = signal(0);
+/** The file's duration once the current silence configuration's cuts are applied — the same length the export would produce. */
+export const processedDurationSeconds = signal(0);
 
 let activeWorkerClient: AudioAnalysisWorkerClient | null = null;
 let activePlaybackController: PreviewPlaybackController | null = null;
@@ -67,7 +69,7 @@ export async function loadAudioFile(file: File, restoredConfig?: DetectionConfig
     amplitudeEnvelope.value = envelope;
     detectionConfig.value = configToUse;
     silenceRegions.value = regions;
-    playbackController.updateSegments(regions, configToUse);
+    syncPlaybackSegments();
 
     activeFile = file;
     void savePersistedSession({ fileBlob: file, fileName: file.name, detectionConfig: configToUse, exportFormat: exportFormat.value });
@@ -128,6 +130,7 @@ export function resetAudioFile(): void {
   errorMessage.value = null;
   isPlaybackPlaying.value = false;
   playbackCurrentTimeSeconds.value = 0;
+  processedDurationSeconds.value = 0;
 }
 
 /** Used by the user-facing "Reset" action: clears in-memory state *and* the persisted session, unlike the
@@ -140,7 +143,10 @@ export function resetAudioFileAndClearStorage(): void {
 
 function syncPlaybackSegments(): void {
   const config = detectionConfig.value;
-  if (activePlaybackController && config) activePlaybackController.updateSegments(silenceRegions.value, config);
+  if (!activePlaybackController || !config) return;
+
+  activePlaybackController.updateSegments(silenceRegions.value, config);
+  processedDurationSeconds.value = activePlaybackController.getRemainingDurationSeconds();
 }
 
 function scheduleRegionRecompute(): void {

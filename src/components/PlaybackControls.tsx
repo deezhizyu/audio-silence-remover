@@ -4,6 +4,7 @@ import { formatDurationClock } from '../utils/formatNumbers';
 interface PlaybackControlsProps {
   isPlayingSignal: Signal<boolean>;
   currentTimeSecondsSignal: Signal<number>;
+  processedDurationSecondsSignal: Signal<number>;
   durationSeconds: number;
   onTogglePlayback: () => void;
   onRestart: () => void;
@@ -12,6 +13,7 @@ interface PlaybackControlsProps {
 export function PlaybackControls({
   isPlayingSignal,
   currentTimeSecondsSignal,
+  processedDurationSecondsSignal,
   durationSeconds,
   onTogglePlayback,
   onRestart,
@@ -61,7 +63,10 @@ export function PlaybackControls({
 
       <span class="font-mono text-xs tabular-nums text-text-secondary">
         {formatDurationClock(currentTimeSecondsSignal.value)}
-        <span class="text-text-tertiary"> / {formatDurationClock(durationSeconds)}</span>
+        <span class="text-text-tertiary">
+          {' '}
+          / {formatDurationClock(durationSeconds)} ({formatDurationClock(processedDurationSecondsSignal.value)})
+        </span>
       </span>
     </div>
   );

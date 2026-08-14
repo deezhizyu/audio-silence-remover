@@ -20,6 +20,7 @@ import {
   isPlaybackPlaying,
   loadAudioFile,
   playbackCurrentTimeSeconds,
+  processedDurationSeconds,
   resetAudioFileAndClearStorage,
   restartPlayback,
   restoreSession,
@@ -59,6 +60,22 @@ function handleDownload(): void {
 export function App() {
   useEffect(() => {
     void restoreSession();
+  }, []);
+
+  // Global play/pause shortcut. Skipped whenever something else is focused (a slider, a button, the file
+  // input, …) so it doesn't fight that element's own use of the key — e.g. Space re-clicking a focused button.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== 'Space') return;
+      if (document.activeElement !== document.body) return;
+      if (uploadedFileName.value === null) return;
+
+      event.preventDefault();
+      togglePlayback();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   const fileName = uploadedFileName.value;
@@ -101,6 +118,7 @@ export function App() {
               <PlaybackControls
                 isPlayingSignal={isPlaybackPlaying}
                 currentTimeSecondsSignal={playbackCurrentTimeSeconds}
+                processedDurationSecondsSignal={processedDurationSeconds}
                 durationSeconds={envelope.durationSeconds}
                 onTogglePlayback={togglePlayback}
                 onRestart={restartPlayback}

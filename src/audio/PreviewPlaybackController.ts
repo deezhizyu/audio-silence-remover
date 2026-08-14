@@ -44,6 +44,11 @@ export class PreviewPlaybackController {
     return this.audioBuffer.duration;
   }
 
+  /** Total playable duration once the current silence configuration's cuts are applied — the same length the export would produce. */
+  getRemainingDurationSeconds(): number {
+    return this.segments.reduce((total, segment) => total + (segment.originalEndSeconds - segment.originalStartSeconds), 0);
+  }
+
   updateSegments(regions: SilenceRegion[], config: DetectionConfig): void {
     const resumeFromSeconds = this.isPlaying ? this.getCurrentOriginalTimeSeconds() : this.lastKnownOriginalTimeSeconds;
     this.segments = computePlaybackSegments(this.audioBuffer.duration, this.audioBuffer.sampleRate, regions, config);
