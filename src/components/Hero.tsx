@@ -57,6 +57,7 @@ export function Hero() {
         <TrustPill label="Three-tier precision" />
         <TrustPill label="Auto-detected defaults" />
         <TrustPill label="100% local" />
+        <TrustPill label="Fully open-source" />
       </div>
     </section>
   );
