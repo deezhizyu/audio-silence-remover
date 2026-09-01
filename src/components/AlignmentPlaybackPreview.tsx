@@ -61,27 +61,30 @@ export function AlignmentPlaybackPreview({ voiceChangedReady }: AlignmentPlaybac
   };
 
   return (
-    <Card>
-      <video ref={videoElementRef} src={videoSrc ?? undefined} class="w-full rounded-lg border border-border-subtle bg-black" playsInline muted />
+    <Card class="flex h-full flex-col">
+      <video
+        ref={videoElementRef}
+        src={videoSrc ?? undefined}
+        class="min-h-0 w-full flex-1 rounded-lg border border-border-subtle bg-black object-contain"
+        playsInline
+        muted
+      />
 
-      <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <div class="flex items-center gap-2">
-          <Button variant="ghost" onClick={handleRestart}>
-            ⏮ Restart
-          </Button>
-          <Button variant={activeSource === 'original' && isPlaying ? 'primary' : 'secondary'} onClick={handleToggleOriginal}>
-            {activeSource === 'original' && isPlaying ? 'Pause' : 'Play'} original
-          </Button>
-          <Button
-            variant={activeSource === 'voiceChanged' && isPlaying ? 'primary' : 'secondary'}
-            onClick={handleToggleVoiceChanged}
-            disabled={!voiceChangedReady}
-          >
-            {activeSource === 'voiceChanged' && isPlaying ? 'Pause' : 'Play'} voice-changed
-          </Button>
-        </div>
-
-        <span class="font-mono text-xs tabular-nums text-text-secondary">
+      <div class="mt-4 flex flex-shrink-0 flex-wrap items-center gap-2">
+        <Button variant="ghost" onClick={handleRestart}>
+          ⏮ Restart
+        </Button>
+        <Button variant={activeSource === 'original' && isPlaying ? 'primary' : 'secondary'} onClick={handleToggleOriginal}>
+          {activeSource === 'original' && isPlaying ? 'Pause' : 'Play'} original
+        </Button>
+        <Button
+          variant={activeSource === 'voiceChanged' && isPlaying ? 'primary' : 'secondary'}
+          onClick={handleToggleVoiceChanged}
+          disabled={!voiceChangedReady}
+        >
+          {activeSource === 'voiceChanged' && isPlaying ? 'Pause' : 'Play'} voice-changed
+        </Button>
+        <span class="ml-auto font-mono text-xs tabular-nums text-text-secondary">
           {formatDurationClock(playbackCurrentTimeSeconds.value)}
           <span class="text-text-tertiary"> / {formatDurationClock(originalVideoDurationSeconds.value)}</span>
         </span>

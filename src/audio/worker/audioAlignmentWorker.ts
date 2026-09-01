@@ -1,4 +1,5 @@
 import { applyEdgeFades } from '../applyEdgeFades';
+import { chooseAlignmentEnvelopeWindowSeconds } from '../chooseAlignmentEnvelopeWindowSeconds';
 import { computeAmplitudeEnvelope, type AmplitudeEnvelope } from '../computeAmplitudeEnvelope';
 import { decideOutputContainerFormat } from '../decideOutputContainerFormat';
 import { decodeMediaFileAudioTrack } from '../decodeMediaFileAudioTrack';
@@ -38,7 +39,7 @@ self.onmessage = (event: MessageEvent<AudioAlignmentWorkerRequest>) => {
         case 'loadVideoSource': {
           const { channelData, sampleRate, durationSeconds } = await decodeMediaFileAudioTrack(request.videoFile);
           retainedVideoFile = request.videoFile;
-          retainedOriginalEnvelope = computeAmplitudeEnvelope(channelData, sampleRate);
+          retainedOriginalEnvelope = computeAmplitudeEnvelope(channelData, sampleRate, chooseAlignmentEnvelopeWindowSeconds(durationSeconds));
 
           respond({
             type: 'loadVideoSource',
@@ -53,7 +54,7 @@ self.onmessage = (event: MessageEvent<AudioAlignmentWorkerRequest>) => {
           const { channelData, sampleRate, durationSeconds } = await decodeMediaFileAudioTrack(request.audioFile);
           retainedVoiceChangedChannelData = channelData;
           retainedVoiceChangedSampleRate = sampleRate;
-          retainedVoiceChangedEnvelope = computeAmplitudeEnvelope(channelData, sampleRate);
+          retainedVoiceChangedEnvelope = computeAmplitudeEnvelope(channelData, sampleRate, chooseAlignmentEnvelopeWindowSeconds(durationSeconds));
 
           // The main thread needs the actual PCM to build a playback preview buffer — a fresh copy per
           // channel, transferred zero-copy, so the transfer doesn't detach the arrays retained above for export.

@@ -97,15 +97,16 @@ export function AudioAlignmentPage() {
 
       {bothSourcesLoaded && (
         <div class="mt-8 flex flex-col gap-6">
-          <div style={fadeUpEntranceStyle(2)}>
-            <AlignmentPlaybackPreview voiceChangedReady={voiceChangedEnvelope !== null} />
+          <div style={fadeUpEntranceStyle(2)} class="flex flex-col gap-4 lg:flex-row lg:items-stretch">
+            <div class="lg:w-80 lg:flex-shrink-0">
+              <AlignmentPlaybackPreview voiceChangedReady={voiceChangedEnvelope !== null} />
+            </div>
+            <div class="min-w-0 flex-1">
+              <AlignmentWaveforms originalVideoEnvelope={originalEnvelope} voiceChangedAudioEnvelope={voiceChangedEnvelope} />
+            </div>
           </div>
 
           <div style={fadeUpEntranceStyle(3)}>
-            <AlignmentWaveforms originalVideoEnvelope={originalEnvelope} voiceChangedAudioEnvelope={voiceChangedEnvelope} />
-          </div>
-
-          <div style={fadeUpEntranceStyle(4)}>
             <Card>
               <SectionHeading title="Offset and trim" description="Manual controls only — nothing here is auto-detected." />
               <div class="mt-4 flex flex-col gap-5">
@@ -140,7 +141,7 @@ export function AudioAlignmentPage() {
             </Card>
           </div>
 
-          <div style={fadeUpEntranceStyle(5)}>
+          <div style={fadeUpEntranceStyle(4)}>
             <AlignmentMetricsPanel
               offsetSeconds={offsetSeconds.value}
               trimStartSeconds={trimStartSeconds.value}
@@ -150,7 +151,7 @@ export function AudioAlignmentPage() {
             />
           </div>
 
-          <div style={fadeUpEntranceStyle(6)} class="flex flex-col gap-3 rounded-lg border border-border-subtle bg-surface-raised p-5">
+          <div style={fadeUpEntranceStyle(5)} class="flex flex-col gap-3 rounded-lg border border-border-subtle bg-surface-raised p-5">
             <div class="flex flex-wrap items-center justify-end gap-3">
               <Button variant="ghost" onClick={resetAudioAlignmentSession}>
                 Reset
