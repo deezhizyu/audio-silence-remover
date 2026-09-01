@@ -1,5 +1,5 @@
 import { computed, signal } from '@preact/signals';
-import { AlignmentPreviewPlaybackController } from '../audio/AlignmentPreviewPlaybackController';
+import { AlignmentPreviewPlaybackController, type AlignmentPlaybackSource } from '../audio/AlignmentPreviewPlaybackController';
 import { buildAudioBufferFromChannels } from '../audio/buildAudioBufferFromChannels';
 import { AudioAlignmentWorkerClient } from '../audio/worker/AudioAlignmentWorkerClient';
 import type { AlignmentBatchPairFailure, AlignmentBatchPairInput } from '../audio/worker/audioAlignmentWorkerMessages';
@@ -53,6 +53,7 @@ export const previewVideoObjectUrl = signal<string | null>(null);
 export const originalVideoEnvelope = signal<SerializedAmplitudeEnvelope | null>(null);
 export const voiceChangedAudioEnvelope = signal<SerializedAmplitudeEnvelope | null>(null);
 
+export const activePlaybackSource = signal<AlignmentPlaybackSource | null>(null);
 export const isPlaybackPlaying = signal(false);
 export const playbackCurrentTimeSeconds = signal(0);
 
@@ -80,8 +81,9 @@ function ensurePlaybackController(): AlignmentPreviewPlaybackController {
   controller.onTimeUpdate = seconds => {
     playbackCurrentTimeSeconds.value = seconds;
   };
-  controller.onPlaybackStateChange = isPlaying => {
+  controller.onPlaybackStateChange = (isPlaying, source) => {
     isPlaybackPlaying.value = isPlaying;
+    if (isPlaying) activePlaybackSource.value = source;
   };
   activePlaybackController = controller;
   return controller;
@@ -156,8 +158,12 @@ export function setZoomCenterSeconds(seconds: number | null): void {
   zoomCenterSeconds.value = seconds;
 }
 
-export function playPreview(fromSeconds?: number): void {
-  ensurePlaybackController().play(fromSeconds, offsetSeconds.value);
+export function playOriginalAudio(fromSeconds?: number): void {
+  ensurePlaybackController().playOriginal(fromSeconds);
+}
+
+export function playVoiceChangedAudio(fromSeconds?: number): void {
+  ensurePlaybackController().playVoiceChanged(fromSeconds, offsetSeconds.value);
 }
 
 export function pausePreview(): void {
@@ -212,6 +218,7 @@ export function resetAudioAlignmentSession(): void {
   previewVideoObjectUrl.value = null;
   originalVideoEnvelope.value = null;
   voiceChangedAudioEnvelope.value = null;
+  activePlaybackSource.value = null;
   isPlaybackPlaying.value = false;
   playbackCurrentTimeSeconds.value = 0;
   isExportingBatch.value = false;
