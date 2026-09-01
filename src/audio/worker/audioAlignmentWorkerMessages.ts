@@ -1,3 +1,5 @@
+import type { SerializedAmplitudeEnvelope } from './workerMessages';
+
 export interface AlignmentBatchPairInput {
   baseName: string;
   videoFile: File;
@@ -10,11 +12,18 @@ export interface AlignmentBatchPairFailure {
 }
 
 export type AudioAlignmentWorkerRequest =
-  | { type: 'decodeReferenceAudio'; requestId: number; audioFile: File }
+  | { type: 'loadReferencePair'; requestId: number; videoFile: File; audioFile: File }
   | { type: 'exportBatch'; requestId: number; pairs: AlignmentBatchPairInput[]; offsetSeconds: number };
 
 export type AudioAlignmentWorkerResponse =
-  | { type: 'decodeReferenceAudio'; requestId: number; channelData: Float32Array<ArrayBuffer>[]; sampleRate: number }
+  | {
+      type: 'loadReferencePair';
+      requestId: number;
+      originalVideoEnvelope: SerializedAmplitudeEnvelope;
+      voiceChangedAudioEnvelope: SerializedAmplitudeEnvelope;
+      voiceChangedChannelData: Float32Array<ArrayBuffer>[];
+      voiceChangedSampleRate: number;
+    }
   | { type: 'exportBatchProgress'; requestId: number; completed: number; total: number; baseName: string }
   | { type: 'exportBatch'; requestId: number; zipFileBytes: ArrayBuffer; failures: AlignmentBatchPairFailure[] }
   | { type: 'error'; requestId: number; message: string };

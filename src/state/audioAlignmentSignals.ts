@@ -3,6 +3,7 @@ import { AlignmentPreviewPlaybackController } from '../audio/AlignmentPreviewPla
 import { buildAudioBufferFromChannels } from '../audio/buildAudioBufferFromChannels';
 import { AudioAlignmentWorkerClient } from '../audio/worker/AudioAlignmentWorkerClient';
 import type { AlignmentBatchPairFailure, AlignmentBatchPairInput } from '../audio/worker/audioAlignmentWorkerMessages';
+import type { SerializedAmplitudeEnvelope } from '../audio/worker/workerMessages';
 import { downloadBlob } from '../utils/downloadBlob';
 
 export interface MatchedAlignmentPair {
@@ -41,10 +42,16 @@ export const unmatchedAudioFiles = computed<File[]>(() => {
 
 export const offsetSeconds = signal(0);
 
+/** The point (on the original video's timeline) the user last clicked to zoom in on — `null` means fully
+    zoomed out, showing each waveform's full duration. */
+export const zoomCenterSeconds = signal<number | null>(null);
+
 export const isLoadingPreview = signal(false);
 export const previewErrorMessage = signal<string | null>(null);
 /** Feeds the `<video>` element's `src` — an object URL for the reference pair's video file. */
 export const previewVideoObjectUrl = signal<string | null>(null);
+export const originalVideoEnvelope = signal<SerializedAmplitudeEnvelope | null>(null);
+export const voiceChangedAudioEnvelope = signal<SerializedAmplitudeEnvelope | null>(null);
 
 export const isPlaybackPlaying = signal(false);
 export const playbackCurrentTimeSeconds = signal(0);
@@ -97,6 +104,9 @@ async function refreshPreviewFromFirstMatchedPair(): Promise<void> {
     activePlaybackController?.setVoiceChangedBuffer(null);
     if (previewVideoObjectUrl.value) URL.revokeObjectURL(previewVideoObjectUrl.value);
     previewVideoObjectUrl.value = null;
+    originalVideoEnvelope.value = null;
+    voiceChangedAudioEnvelope.value = null;
+    zoomCenterSeconds.value = null;
     previewErrorMessage.value = null;
     return;
   }
@@ -106,6 +116,9 @@ async function refreshPreviewFromFirstMatchedPair(): Promise<void> {
 
   previewErrorMessage.value = null;
   isLoadingPreview.value = true;
+  originalVideoEnvelope.value = null;
+  voiceChangedAudioEnvelope.value = null;
+  zoomCenterSeconds.value = null;
   ensurePlaybackController().pause();
   ensurePlaybackController().setVoiceChangedBuffer(null);
 
@@ -113,8 +126,11 @@ async function refreshPreviewFromFirstMatchedPair(): Promise<void> {
     if (previewVideoObjectUrl.value) URL.revokeObjectURL(previewVideoObjectUrl.value);
     previewVideoObjectUrl.value = URL.createObjectURL(firstPair.videoFile);
 
-    const { channelData, sampleRate } = await ensureWorkerClient().decodeReferenceAudio(firstPair.audioFile);
-    ensurePlaybackController().setVoiceChangedBuffer(buildAudioBufferFromChannels(channelData, sampleRate));
+    const { originalVideoEnvelope: videoEnvelope, voiceChangedAudioEnvelope: audioEnvelope, voiceChangedChannelData, voiceChangedSampleRate } =
+      await ensureWorkerClient().loadReferencePair(firstPair.videoFile, firstPair.audioFile);
+    originalVideoEnvelope.value = videoEnvelope;
+    voiceChangedAudioEnvelope.value = audioEnvelope;
+    ensurePlaybackController().setVoiceChangedBuffer(buildAudioBufferFromChannels(voiceChangedChannelData, voiceChangedSampleRate));
   } catch (caughtError) {
     previewErrorMessage.value = caughtError instanceof Error ? caughtError.message : 'Could not load this pair for preview.';
   } finally {
@@ -134,6 +150,10 @@ export function setVoiceChangedAudioFiles(files: File[]): void {
 
 export function updateOffsetSeconds(seconds: number): void {
   offsetSeconds.value = seconds;
+}
+
+export function setZoomCenterSeconds(seconds: number | null): void {
+  zoomCenterSeconds.value = seconds;
 }
 
 export function playPreview(fromSeconds?: number): void {
@@ -186,9 +206,12 @@ export function resetAudioAlignmentSession(): void {
   originalVideoFiles.value = [];
   voiceChangedAudioFiles.value = [];
   offsetSeconds.value = 0;
+  zoomCenterSeconds.value = null;
   isLoadingPreview.value = false;
   previewErrorMessage.value = null;
   previewVideoObjectUrl.value = null;
+  originalVideoEnvelope.value = null;
+  voiceChangedAudioEnvelope.value = null;
   isPlaybackPlaying.value = false;
   playbackCurrentTimeSeconds.value = 0;
   isExportingBatch.value = false;

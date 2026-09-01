@@ -4,10 +4,13 @@ import type {
   AudioAlignmentWorkerRequest,
   AudioAlignmentWorkerResponse,
 } from './audioAlignmentWorkerMessages';
+import type { SerializedAmplitudeEnvelope } from './workerMessages';
 
-export interface DecodeReferenceAudioResult {
-  channelData: Float32Array<ArrayBuffer>[];
-  sampleRate: number;
+export interface LoadReferencePairResult {
+  originalVideoEnvelope: SerializedAmplitudeEnvelope;
+  voiceChangedAudioEnvelope: SerializedAmplitudeEnvelope;
+  voiceChangedChannelData: Float32Array<ArrayBuffer>[];
+  voiceChangedSampleRate: number;
 }
 
 export interface ExportBatchResult {
@@ -64,11 +67,16 @@ export class AudioAlignmentWorkerClient {
     });
   }
 
-  async decodeReferenceAudio(audioFile: File): Promise<DecodeReferenceAudioResult> {
+  async loadReferencePair(videoFile: File, audioFile: File): Promise<LoadReferencePairResult> {
     const requestId = this.nextRequestId++;
-    const response = await this.sendRequest({ type: 'decodeReferenceAudio', requestId, audioFile });
-    if (response.type !== 'decodeReferenceAudio') throw new Error('Unexpected response to decodeReferenceAudio.');
-    return { channelData: response.channelData, sampleRate: response.sampleRate };
+    const response = await this.sendRequest({ type: 'loadReferencePair', requestId, videoFile, audioFile });
+    if (response.type !== 'loadReferencePair') throw new Error('Unexpected response to loadReferencePair.');
+    return {
+      originalVideoEnvelope: response.originalVideoEnvelope,
+      voiceChangedAudioEnvelope: response.voiceChangedAudioEnvelope,
+      voiceChangedChannelData: response.voiceChangedChannelData,
+      voiceChangedSampleRate: response.voiceChangedSampleRate,
+    };
   }
 
   async exportBatch(pairs: AlignmentBatchPairInput[], offsetSeconds: number, onProgress?: ExportBatchProgressCallback): Promise<ExportBatchResult> {

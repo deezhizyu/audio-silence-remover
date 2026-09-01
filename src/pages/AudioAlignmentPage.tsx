@@ -1,4 +1,5 @@
 import { AlignmentPlaybackPreview } from '../components/AlignmentPlaybackPreview';
+import { AlignmentWaveforms } from '../components/AlignmentWaveforms';
 import { Dropzone } from '../components/Dropzone';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -11,12 +12,14 @@ import {
   exportProgress,
   isExportingBatch,
   matchedPairs,
+  originalVideoEnvelope,
   originalVideoFiles,
   resetAudioAlignmentSession,
   setOriginalVideoFiles,
   setVoiceChangedAudioFiles,
   unmatchedAudioFiles,
   unmatchedVideoFiles,
+  voiceChangedAudioEnvelope,
   voiceChangedAudioFiles,
 } from '../state/audioAlignmentSignals';
 
@@ -32,6 +35,8 @@ export function AudioAlignmentPage() {
   const unmatchedAudios = unmatchedAudioFiles.value;
   const hasAnyFiles = videoFiles.length > 0 || audioFiles.length > 0;
   const progress = exportProgress.value;
+  const originalEnvelope = originalVideoEnvelope.value;
+  const voiceChangedEnvelope = voiceChangedAudioEnvelope.value;
 
   return (
     <main class="mx-auto max-w-5xl px-6 pb-10">
@@ -105,7 +110,13 @@ export function AudioAlignmentPage() {
             <AlignmentPlaybackPreview />
           </div>
 
-          <div style={fadeUpEntranceStyle(4)} class="flex flex-col gap-3 rounded-lg border border-border-subtle bg-surface-raised p-5">
+          {originalEnvelope && voiceChangedEnvelope && (
+            <div style={fadeUpEntranceStyle(4)}>
+              <AlignmentWaveforms originalVideoEnvelope={originalEnvelope} voiceChangedAudioEnvelope={voiceChangedEnvelope} />
+            </div>
+          )}
+
+          <div style={fadeUpEntranceStyle(5)} class="flex flex-col gap-3 rounded-lg border border-border-subtle bg-surface-raised p-5">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <p class="text-xs text-text-secondary">
                 {isExportingBatch.value && progress

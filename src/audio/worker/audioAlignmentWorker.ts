@@ -1,11 +1,22 @@
 import { zipSync } from 'fflate';
 import { applyEdgeFades } from '../applyEdgeFades';
+import { chooseAlignmentEnvelopeWindowSeconds } from '../chooseAlignmentEnvelopeWindowSeconds';
+import { computeAmplitudeEnvelope, type AmplitudeEnvelope } from '../computeAmplitudeEnvelope';
 import { decideOutputContainerFormat } from '../decideOutputContainerFormat';
 import { decodeMediaFileAudioTrack } from '../decodeMediaFileAudioTrack';
 import { deriveAlignedVideoFileName } from '../deriveAlignedVideoFileName';
 import { muxAudioIntoVideoContainer } from '../muxAudioIntoVideoContainer';
 import { shiftAndTrimAudioChannels } from '../shiftAndTrimAudioChannels';
 import type { AlignmentBatchPairFailure, AudioAlignmentWorkerRequest, AudioAlignmentWorkerResponse } from './audioAlignmentWorkerMessages';
+
+function serializeEnvelope(envelope: AmplitudeEnvelope) {
+  return {
+    rootMeanSquarePerWindow: envelope.rootMeanSquarePerWindow.slice(),
+    windowSizeSeconds: envelope.windowSizeSeconds,
+    peakAmplitude: envelope.peakAmplitude,
+    durationSeconds: envelope.durationSeconds,
+  };
+}
 
 function respond(response: AudioAlignmentWorkerResponse, transferables: Transferable[] = []): void {
   self.postMessage(response, { transfer: transferables });
@@ -27,12 +38,37 @@ self.onmessage = (event: MessageEvent<AudioAlignmentWorkerRequest>) => {
   void (async () => {
     try {
       switch (request.type) {
-        case 'decodeReferenceAudio': {
-          const { channelData, sampleRate } = await decodeMediaFileAudioTrack(request.audioFile);
-          const channelDataCopy = channelData.map(channel => channel.slice());
+        case 'loadReferencePair': {
+          const [video, audio] = await Promise.all([
+            decodeMediaFileAudioTrack(request.videoFile),
+            decodeMediaFileAudioTrack(request.audioFile),
+          ]);
+
+          const originalVideoEnvelope = computeAmplitudeEnvelope(
+            video.channelData,
+            video.sampleRate,
+            chooseAlignmentEnvelopeWindowSeconds(video.durationSeconds),
+          );
+          const voiceChangedAudioEnvelope = computeAmplitudeEnvelope(
+            audio.channelData,
+            audio.sampleRate,
+            chooseAlignmentEnvelopeWindowSeconds(audio.durationSeconds),
+          );
+
+          // A fresh copy, so transferring it to the main thread for the playback buffer doesn't detach
+          // anything this worker still needs (nothing here, but matches the pattern used elsewhere).
+          const voiceChangedChannelDataCopy = audio.channelData.map(channel => channel.slice());
+
           respond(
-            { type: 'decodeReferenceAudio', requestId: request.requestId, channelData: channelDataCopy, sampleRate },
-            channelDataCopy.map(channel => channel.buffer),
+            {
+              type: 'loadReferencePair',
+              requestId: request.requestId,
+              originalVideoEnvelope: serializeEnvelope(originalVideoEnvelope),
+              voiceChangedAudioEnvelope: serializeEnvelope(voiceChangedAudioEnvelope),
+              voiceChangedChannelData: voiceChangedChannelDataCopy,
+              voiceChangedSampleRate: audio.sampleRate,
+            },
+            voiceChangedChannelDataCopy.map(channel => channel.buffer),
           );
           break;
         }
