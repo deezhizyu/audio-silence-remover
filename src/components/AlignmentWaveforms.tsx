@@ -11,7 +11,7 @@ interface AlignmentWaveformsProps {
   voiceChangedAudioEnvelope: SerializedAmplitudeEnvelope;
 }
 
-const ZOOM_WINDOW_SECONDS = 1.5;
+const ZOOM_WINDOW_SECONDS = 0.5;
 
 /** Waveforms for the reference (first matched) pair only — batch export applies the same offset to
     every other pair without a per-pair waveform check. */
