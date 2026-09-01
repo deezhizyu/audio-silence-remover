@@ -1,12 +1,9 @@
 import { applyEdgeFades } from '../applyEdgeFades';
-import { computeAlignmentTrim } from '../computeAlignmentTrim';
 import { computeAmplitudeEnvelope, type AmplitudeEnvelope } from '../computeAmplitudeEnvelope';
-import { computeCrossCorrelationOffsetSeconds } from '../computeCrossCorrelationOffsetSeconds';
 import { decideOutputContainerFormat } from '../decideOutputContainerFormat';
 import { decodeMediaFileAudioTrack } from '../decodeMediaFileAudioTrack';
-import { detectEdgeSilenceDurations } from '../detectEdgeSilenceDurations';
 import { muxAudioIntoVideoContainer } from '../muxAudioIntoVideoContainer';
-import { trimAudioChannels } from '../trimAudioChannels';
+import { shiftAndTrimAudioChannels } from '../shiftAndTrimAudioChannels';
 import type { AudioAlignmentWorkerRequest, AudioAlignmentWorkerResponse } from './audioAlignmentWorkerMessages';
 
 /** Below this, the result of trimming is too short to be a meaningful export (and too short for the edge fades to make sense). */
@@ -14,12 +11,10 @@ const MINIMUM_EXPORTABLE_DURATION_SECONDS = 0.5;
 
 let retainedVideoFile: File | null = null;
 let retainedOriginalEnvelope: AmplitudeEnvelope | null = null;
-let retainedOriginalAudioDurationSeconds = 0;
 
 let retainedVoiceChangedChannelData: Float32Array<ArrayBuffer>[] = [];
 let retainedVoiceChangedSampleRate = 0;
 let retainedVoiceChangedEnvelope: AmplitudeEnvelope | null = null;
-let retainedVoiceChangedDurationSeconds = 0;
 
 function serializeEnvelope(envelope: AmplitudeEnvelope) {
   return {
@@ -44,7 +39,6 @@ self.onmessage = (event: MessageEvent<AudioAlignmentWorkerRequest>) => {
           const { channelData, sampleRate, durationSeconds } = await decodeMediaFileAudioTrack(request.videoFile);
           retainedVideoFile = request.videoFile;
           retainedOriginalEnvelope = computeAmplitudeEnvelope(channelData, sampleRate);
-          retainedOriginalAudioDurationSeconds = durationSeconds;
 
           respond({
             type: 'loadVideoSource',
@@ -60,14 +54,22 @@ self.onmessage = (event: MessageEvent<AudioAlignmentWorkerRequest>) => {
           retainedVoiceChangedChannelData = channelData;
           retainedVoiceChangedSampleRate = sampleRate;
           retainedVoiceChangedEnvelope = computeAmplitudeEnvelope(channelData, sampleRate);
-          retainedVoiceChangedDurationSeconds = durationSeconds;
 
-          respond({
-            type: 'loadVoiceChangedSource',
-            requestId: request.requestId,
-            envelope: serializeEnvelope(retainedVoiceChangedEnvelope),
-            durationSeconds,
-          });
+          // The main thread needs the actual PCM to build a playback preview buffer — a fresh copy per
+          // channel, transferred zero-copy, so the transfer doesn't detach the arrays retained above for export.
+          const channelDataForMainThread = channelData.map(channel => channel.slice());
+
+          respond(
+            {
+              type: 'loadVoiceChangedSource',
+              requestId: request.requestId,
+              envelope: serializeEnvelope(retainedVoiceChangedEnvelope),
+              durationSeconds,
+              channelData: channelDataForMainThread,
+              sampleRate,
+            },
+            channelDataForMainThread.map(channel => channel.buffer),
+          );
           break;
         }
 
@@ -76,45 +78,18 @@ self.onmessage = (event: MessageEvent<AudioAlignmentWorkerRequest>) => {
             throw new Error('Both a video and a voice-changed audio file must be loaded first.');
           }
 
-          const { volumeThresholdPercent, cutEdgeSilenceEnabled } = request;
+          const { offsetSeconds, trimStartSeconds, trimEndSeconds } = request;
 
-          // The sync offset comes from correlating the two audio signals directly, not from comparing
-          // where each one crosses the volume threshold — see computeCrossCorrelationOffsetSeconds for why.
-          const correlationOffsetSeconds = computeCrossCorrelationOffsetSeconds(retainedOriginalEnvelope, retainedVoiceChangedEnvelope);
-          const alignmentTrim = computeAlignmentTrim({
-            startTrimSeconds: correlationOffsetSeconds,
-            originalAudioDurationSeconds: retainedOriginalAudioDurationSeconds,
-            voiceChangedDurationSeconds: retainedVoiceChangedDurationSeconds,
-          });
-
-          let processedChannelData = trimAudioChannels(
+          let processedChannelData = shiftAndTrimAudioChannels(
             retainedVoiceChangedChannelData,
             retainedVoiceChangedSampleRate,
-            alignmentTrim.startTrimSeconds,
-            alignmentTrim.endTrimSeconds,
+            offsetSeconds + trimStartSeconds,
+            trimEndSeconds,
           );
-
-          // Any further edge-silence trim must happen before the fades below: a fade ramp itself reads as
-          // silence, so trimming edge silence after fading would undo the very fade meant to prevent a pop.
-          if (cutEdgeSilenceEnabled) {
-            const processedEnvelope = computeAmplitudeEnvelope(processedChannelData, retainedVoiceChangedSampleRate);
-            const residualEdgeSilence = detectEdgeSilenceDurations(processedEnvelope, volumeThresholdPercent);
-
-            if (residualEdgeSilence.leadingSilenceSeconds + residualEdgeSilence.trailingSilenceSeconds >= processedEnvelope.durationSeconds) {
-              throw new Error('The aligned audio is silent throughout — nothing to export.');
-            }
-
-            processedChannelData = trimAudioChannels(
-              processedChannelData,
-              retainedVoiceChangedSampleRate,
-              residualEdgeSilence.leadingSilenceSeconds,
-              residualEdgeSilence.trailingSilenceSeconds,
-            );
-          }
 
           const finalDurationSeconds = (processedChannelData[0]?.length ?? 0) / retainedVoiceChangedSampleRate;
           if (finalDurationSeconds < MINIMUM_EXPORTABLE_DURATION_SECONDS) {
-            throw new Error('Not enough audio remains after trimming to export — try a lower silence threshold.');
+            throw new Error('Not enough audio remains after the offset and trims to export — try adjusting them.');
           }
 
           processedChannelData = applyEdgeFades(processedChannelData, retainedVoiceChangedSampleRate);

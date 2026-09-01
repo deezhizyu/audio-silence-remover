@@ -1,15 +1,13 @@
 import { AlignmentMetricsPanel } from '../components/AlignmentMetricsPanel';
+import { AlignmentPlaybackPreview } from '../components/AlignmentPlaybackPreview';
 import { AlignmentWaveforms } from '../components/AlignmentWaveforms';
 import { Dropzone } from '../components/Dropzone';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { RangeControl } from '../components/ui/RangeControl';
 import { SectionHeading } from '../components/ui/SectionHeading';
-import { Toggle } from '../components/ui/Toggle';
 import { fadeUpEntranceStyle } from '../utils/fadeUpEntranceStyle';
 import {
-  alignmentMetrics,
-  cutEdgeSilenceEnabled,
   exportAlignedVideo,
   exportErrorMessage,
   isExportingVideo,
@@ -17,17 +15,24 @@ import {
   isLoadingVoiceChangedSource,
   loadOriginalVideoFile,
   loadVoiceChangedAudioFile,
+  offsetSeconds,
+  originalVideoDurationSeconds,
   originalVideoEnvelope,
   originalVideoFileName,
   resetAudioAlignmentSession,
-  setCutEdgeSilenceEnabled,
-  updateVolumeThresholdPercent,
+  trimEndSeconds,
+  trimStartSeconds,
+  updateOffsetSeconds,
+  updateTrimEndSeconds,
+  updateTrimStartSeconds,
+  voiceChangedAudioDurationSeconds,
   voiceChangedAudioEnvelope,
   voiceChangedAudioFileName,
   voiceChangedSourceErrorMessage,
   videoSourceErrorMessage,
-  volumeThresholdPercent,
 } from '../state/audioAlignmentSignals';
+
+const OFFSET_RANGE_SECONDS = 10;
 
 function handleVideoFileSelected(file: File): void {
   void loadOriginalVideoFile(file);
@@ -47,14 +52,16 @@ export function AudioAlignmentPage() {
   const originalEnvelope = originalVideoEnvelope.value;
   const voiceChangedEnvelope = voiceChangedAudioEnvelope.value;
   const bothSourcesLoaded = videoFileName !== null && audioFileName !== null && originalEnvelope !== null && voiceChangedEnvelope !== null;
+  const voiceChangedDuration = voiceChangedAudioDurationSeconds.value;
 
   return (
     <main class="mx-auto max-w-5xl px-6 pb-10">
       <div class="mx-auto mt-6 max-w-2xl px-6 pb-8 pt-14 text-center">
         <h1 class="text-3xl font-bold tracking-tight text-text-primary sm:text-4xl">Audio Alignment</h1>
         <p class="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-text-secondary">
-          Fix the padding an AI voice changer adds to your dialogue: line up the voice-changed audio with your
-          original video, then export the video with just the audio swapped — same quality, same picture.
+          Fix the padding an AI voice changer adds to your dialogue: click a point on the waveforms to
+          zoom in, drag the offset until they line up by ear and eye, then export the video with just
+          the audio swapped — same quality, same picture.
         </p>
       </div>
 
@@ -91,41 +98,59 @@ export function AudioAlignmentPage() {
       {bothSourcesLoaded && (
         <div class="mt-8 flex flex-col gap-6">
           <div style={fadeUpEntranceStyle(2)}>
-            <AlignmentWaveforms originalVideoEnvelope={originalEnvelope} voiceChangedAudioEnvelope={voiceChangedEnvelope} metrics={alignmentMetrics.value} />
+            <AlignmentPlaybackPreview voiceChangedReady={voiceChangedEnvelope !== null} />
           </div>
 
           <div style={fadeUpEntranceStyle(3)}>
+            <AlignmentWaveforms originalVideoEnvelope={originalEnvelope} voiceChangedAudioEnvelope={voiceChangedEnvelope} />
+          </div>
+
+          <div style={fadeUpEntranceStyle(4)}>
             <Card>
-              <SectionHeading
-                title="Silence threshold"
-                description="Audio quieter than this threshold of each file's peak volume counts as silence."
-              />
-              <div class="mt-4">
+              <SectionHeading title="Offset and trim" description="Manual controls only — nothing here is auto-detected." />
+              <div class="mt-4 flex flex-col gap-5">
                 <RangeControl
-                  label="Threshold"
-                  value={volumeThresholdPercent.value}
-                  min={1}
-                  max={50}
-                  step={1}
-                  unit="%"
-                  onChange={updateVolumeThresholdPercent}
+                  label="Offset"
+                  value={offsetSeconds.value}
+                  min={-OFFSET_RANGE_SECONDS}
+                  max={OFFSET_RANGE_SECONDS}
+                  step={0.01}
+                  unit="s"
+                  onChange={updateOffsetSeconds}
                 />
-              </div>
-              <div class="mt-5 border-t border-border-subtle pt-5">
-                <Toggle
-                  label="Also trim any remaining silence at the edges"
-                  checked={cutEdgeSilenceEnabled.value}
-                  onChange={setCutEdgeSilenceEnabled}
+                <RangeControl
+                  label="Trim start"
+                  value={trimStartSeconds.value}
+                  min={0}
+                  max={Math.max(voiceChangedDuration, 0.01)}
+                  step={0.01}
+                  unit="s"
+                  onChange={updateTrimStartSeconds}
+                />
+                <RangeControl
+                  label="Trim end"
+                  value={trimEndSeconds.value}
+                  min={0}
+                  max={Math.max(voiceChangedDuration, 0.01)}
+                  step={0.01}
+                  unit="s"
+                  onChange={updateTrimEndSeconds}
                 />
               </div>
             </Card>
           </div>
 
-          <div style={fadeUpEntranceStyle(4)}>
-            <AlignmentMetricsPanel metrics={alignmentMetrics.value} />
+          <div style={fadeUpEntranceStyle(5)}>
+            <AlignmentMetricsPanel
+              offsetSeconds={offsetSeconds.value}
+              trimStartSeconds={trimStartSeconds.value}
+              trimEndSeconds={trimEndSeconds.value}
+              originalAudioDurationSeconds={originalVideoDurationSeconds.value}
+              voiceChangedAudioDurationSeconds={voiceChangedDuration}
+            />
           </div>
 
-          <div style={fadeUpEntranceStyle(5)} class="flex flex-col gap-3 rounded-lg border border-border-subtle bg-surface-raised p-5">
+          <div style={fadeUpEntranceStyle(6)} class="flex flex-col gap-3 rounded-lg border border-border-subtle bg-surface-raised p-5">
             <div class="flex flex-wrap items-center justify-end gap-3">
               <Button variant="ghost" onClick={resetAudioAlignmentSession}>
                 Reset

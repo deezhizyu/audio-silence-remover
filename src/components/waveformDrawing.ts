@@ -57,13 +57,22 @@ export function drawWaveformSlice(context: CanvasRenderingContext2D, params: Dra
   for (let pixelX = 0; pixelX < widthPixels; pixelX++) {
     const fractionStart = startFraction + (pixelX / widthPixels) * (endFraction - startFraction);
     const fractionEnd = startFraction + ((pixelX + 1) / widthPixels) * (endFraction - startFraction);
-    const windowStart = Math.max(0, Math.floor(fractionStart * sampleCount));
-    const windowEnd = Math.min(sampleCount, Math.max(windowStart + 1, Math.ceil(fractionEnd * sampleCount)));
+
+    // A pixel whose fraction range falls partly or fully outside [0, 1] is asking for time outside the
+    // envelope's own duration (e.g. previewing where silence would be inserted before a shifted clip's
+    // real frame 0) — clamp the *lookup* range rather than the fraction range itself, so that portion
+    // renders as true silence instead of a smeared repeat of whichever edge sample is nearest.
+    const clampedFractionStart = Math.max(0, fractionStart);
+    const clampedFractionEnd = Math.min(1, fractionEnd);
 
     let peakAmplitudeInWindow = 0;
-    for (let windowIndex = windowStart; windowIndex < windowEnd; windowIndex++) {
-      if (rootMeanSquarePerWindow[windowIndex] > peakAmplitudeInWindow) {
-        peakAmplitudeInWindow = rootMeanSquarePerWindow[windowIndex];
+    if (clampedFractionEnd > clampedFractionStart) {
+      const windowStart = Math.max(0, Math.floor(clampedFractionStart * sampleCount));
+      const windowEnd = Math.min(sampleCount, Math.max(windowStart + 1, Math.ceil(clampedFractionEnd * sampleCount)));
+      for (let windowIndex = windowStart; windowIndex < windowEnd; windowIndex++) {
+        if (rootMeanSquarePerWindow[windowIndex] > peakAmplitudeInWindow) {
+          peakAmplitudeInWindow = rootMeanSquarePerWindow[windowIndex];
+        }
       }
     }
 

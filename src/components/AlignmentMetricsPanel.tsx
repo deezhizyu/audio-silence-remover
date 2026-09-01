@@ -1,10 +1,13 @@
-import type { AlignmentMetrics } from '../state/audioAlignmentSignals';
 import { formatSecondsLabel } from '../utils/formatNumbers';
 import { Card } from './ui/Card';
 import { SectionHeading } from './ui/SectionHeading';
 
 interface AlignmentMetricsPanelProps {
-  metrics: AlignmentMetrics | null;
+  offsetSeconds: number;
+  trimStartSeconds: number;
+  trimEndSeconds: number;
+  originalAudioDurationSeconds: number;
+  voiceChangedAudioDurationSeconds: number;
 }
 
 function MetricRow({ label, value }: { label: string; value: string }) {
@@ -16,26 +19,30 @@ function MetricRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function AlignmentMetricsPanel({ metrics }: AlignmentMetricsPanelProps) {
-  if (!metrics) {
-    return (
-      <Card>
-        <SectionHeading title="Alignment preview" description="Upload both files to see the detected padding and trim." />
-      </Card>
-    );
-  }
+/** Purely derived arithmetic from the three slider values — nothing here is computed by the app on the
+    user's behalf, it's just a readable summary of what those sliders currently add up to. */
+export function AlignmentMetricsPanel({
+  offsetSeconds,
+  trimStartSeconds,
+  trimEndSeconds,
+  originalAudioDurationSeconds,
+  voiceChangedAudioDurationSeconds,
+}: AlignmentMetricsPanelProps) {
+  const netStartShiftSeconds = offsetSeconds + trimStartSeconds;
+  const resultingDurationSeconds = Math.max(0, voiceChangedAudioDurationSeconds - Math.max(0, netStartShiftSeconds) - trimEndSeconds);
 
   return (
     <Card>
-      <SectionHeading title="Alignment preview" description="The sync offset is detected by matching the two files' waveform transients, not by the threshold below." />
+      <SectionHeading title="Result" description="What the current offset and trims add up to." />
       <div class="mt-4 flex flex-col gap-2">
-        <MetricRow label="Original leading silence (below threshold)" value={formatSecondsLabel(metrics.originalLeadingSilenceSeconds)} />
-        <MetricRow label="Voice-changed leading silence (below threshold)" value={formatSecondsLabel(metrics.voiceChangedLeadingSilenceSeconds)} />
-        <MetricRow label="Trimmed from start (detected sync offset)" value={formatSecondsLabel(metrics.startTrimSeconds)} />
-        <MetricRow label="Trimmed from end (to match original duration)" value={formatSecondsLabel(metrics.endTrimSeconds)} />
+        <MetricRow
+          label={netStartShiftSeconds >= 0 ? 'Trimmed from start' : 'Silence inserted at start'}
+          value={formatSecondsLabel(Math.abs(netStartShiftSeconds))}
+        />
+        <MetricRow label="Trimmed from end" value={formatSecondsLabel(trimEndSeconds)} />
         <MetricRow
           label="Resulting duration / original"
-          value={`${formatSecondsLabel(metrics.resultingDurationSeconds)} / ${formatSecondsLabel(metrics.originalAudioDurationSeconds)}`}
+          value={`${formatSecondsLabel(resultingDurationSeconds)} / ${formatSecondsLabel(originalAudioDurationSeconds)}`}
         />
       </div>
     </Card>

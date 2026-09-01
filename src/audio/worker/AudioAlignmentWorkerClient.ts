@@ -2,9 +2,16 @@ import type { VideoContainerFormat } from '../decideOutputContainerFormat';
 import type { AudioAlignmentWorkerRequest, AudioAlignmentWorkerResponse } from './audioAlignmentWorkerMessages';
 import type { SerializedAmplitudeEnvelope } from './workerMessages';
 
-export interface LoadSourceResult {
+export interface LoadVideoSourceResult {
   envelope: SerializedAmplitudeEnvelope;
   durationSeconds: number;
+}
+
+export interface LoadVoiceChangedSourceResult {
+  envelope: SerializedAmplitudeEnvelope;
+  durationSeconds: number;
+  channelData: Float32Array<ArrayBuffer>[];
+  sampleRate: number;
 }
 
 export interface ExportAlignedVideoResult {
@@ -45,23 +52,28 @@ export class AudioAlignmentWorkerClient {
     });
   }
 
-  async loadVideoSource(videoFile: File): Promise<LoadSourceResult> {
+  async loadVideoSource(videoFile: File): Promise<LoadVideoSourceResult> {
     const requestId = this.nextRequestId++;
     const response = await this.sendRequest({ type: 'loadVideoSource', requestId, videoFile });
     if (response.type !== 'loadVideoSource') throw new Error('Unexpected response to loadVideoSource.');
     return { envelope: response.envelope, durationSeconds: response.durationSeconds };
   }
 
-  async loadVoiceChangedSource(audioFile: File): Promise<LoadSourceResult> {
+  async loadVoiceChangedSource(audioFile: File): Promise<LoadVoiceChangedSourceResult> {
     const requestId = this.nextRequestId++;
     const response = await this.sendRequest({ type: 'loadVoiceChangedSource', requestId, audioFile });
     if (response.type !== 'loadVoiceChangedSource') throw new Error('Unexpected response to loadVoiceChangedSource.');
-    return { envelope: response.envelope, durationSeconds: response.durationSeconds };
+    return {
+      envelope: response.envelope,
+      durationSeconds: response.durationSeconds,
+      channelData: response.channelData,
+      sampleRate: response.sampleRate,
+    };
   }
 
-  async exportAlignedVideo(volumeThresholdPercent: number, cutEdgeSilenceEnabled: boolean): Promise<ExportAlignedVideoResult> {
+  async exportAlignedVideo(offsetSeconds: number, trimStartSeconds: number, trimEndSeconds: number): Promise<ExportAlignedVideoResult> {
     const requestId = this.nextRequestId++;
-    const response = await this.sendRequest({ type: 'exportAlignedVideo', requestId, volumeThresholdPercent, cutEdgeSilenceEnabled });
+    const response = await this.sendRequest({ type: 'exportAlignedVideo', requestId, offsetSeconds, trimStartSeconds, trimEndSeconds });
     if (response.type !== 'exportAlignedVideo') throw new Error('Unexpected response to exportAlignedVideo.');
     return { fileBytes: response.fileBytes, containerFormat: response.containerFormat };
   }
