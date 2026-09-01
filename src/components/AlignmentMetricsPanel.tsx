@@ -27,7 +27,7 @@ export function AlignmentMetricsPanel({ metrics }: AlignmentMetricsPanelProps) {
 
   return (
     <Card>
-      <SectionHeading title="Alignment preview" description="The sync offset is detected by matching the two audio signals, not by the threshold below." />
+      <SectionHeading title="Alignment preview" description="The sync offset is detected by matching the two files' waveform transients, not by the threshold below." />
       <div class="mt-4 flex flex-col gap-2">
         <MetricRow label="Original leading silence (below threshold)" value={formatSecondsLabel(metrics.originalLeadingSilenceSeconds)} />
         <MetricRow label="Voice-changed leading silence (below threshold)" value={formatSecondsLabel(metrics.voiceChangedLeadingSilenceSeconds)} />

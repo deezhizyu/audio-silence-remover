@@ -70,6 +70,21 @@ describe('computeCrossCorrelationOffsetSeconds', () => {
     expect(computeCrossCorrelationOffsetSeconds(original, voiceChanged)).toBe(0);
   });
 
+  test('finds the true offset despite a steady noise floor in the original that the voice-changed audio lacks entirely', () => {
+    // Mirrors a real voice-changer recording: the original has low-level room noise/hiss under the
+    // ENTIRE clip, not just before speech starts — denoising strips that out of the voice-changed
+    // audio, which is true silence apart from the shared speech burst. A raw-amplitude correlation
+    // could be diluted by that mismatched noise floor; onset strength ignores it outright, since a
+    // steady floor has no rising edges to correlate on.
+    const noiseFloorLevel = 0.02;
+    const silence = () => 0;
+    const original = buildEnvelope([...Array.from({ length: 40 }, () => noiseFloorLevel), ...SIGNATURE_SHAPE, ...Array.from({ length: 20 }, () => noiseFloorLevel)]);
+    // The same burst, 0.5s (5 windows) later, on top of true silence rather than noise.
+    const voiceChanged = buildEnvelope([...Array.from({ length: 45 }, silence), ...SIGNATURE_SHAPE, ...Array.from({ length: 15 }, silence)]);
+
+    expect(computeCrossCorrelationOffsetSeconds(original, voiceChanged)).toBeCloseTo(0.5, 1);
+  });
+
   test('prefers the true zero-lag match over a spurious far-away near-tie on beat-like content with irregular spacing', () => {
     // Six pulses at slightly irregular offsets/widths/heights (not a single clean period) — close
     // enough to periodic that a shifted copy of the pattern can score within a fraction of a percent

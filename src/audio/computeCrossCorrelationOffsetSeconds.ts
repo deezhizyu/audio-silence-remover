@@ -1,5 +1,6 @@
 import { clampNumber } from '../utils/clampNumber';
 import type { AmplitudeEnvelope } from './computeAmplitudeEnvelope';
+import { computeOnsetStrengthEnvelope } from './computeOnsetStrengthEnvelope';
 
 export interface CrossCorrelationSearchRangeSeconds {
   minOffsetSeconds: number;
@@ -31,12 +32,17 @@ const DEFAULT_SEARCH_RANGE_SECONDS: CrossCorrelationSearchRangeSeconds = {
 
 /**
  * Finds how far into the voice-changed audio its content actually starts matching the original, by
- * cross-correlating the two RMS amplitude envelopes — rather than comparing where each file happens
- * to cross a volume threshold. A voice changer's output is rarely at the same loudness as its source,
- * so "where does each file stop reading as quiet" and "where does the same sound actually begin" are
- * two different questions; a threshold-based comparison answers the first, silently misattributing any
- * gap between them as content to trim. This answers the second directly, by finding the time shift that
- * makes the two energy contours line up, independent of either file's absolute volume.
+ * cross-correlating each envelope's onset strength (see computeOnsetStrengthEnvelope) — the rising
+ * edges of loud waveform beginnings and individual transients — rather than the raw RMS amplitude or
+ * where either file happens to cross a volume threshold. Two problems with those alternatives, both
+ * seen on real recordings: a voice changer's output is rarely at the same loudness as its source, so
+ * "where does each file stop reading as quiet" and "where does the same sound actually begin" are
+ * different questions, and a threshold-based comparison answers only the first, silently
+ * misattributing any gap between them as content to trim. And a steady background noise floor in the
+ * original recording (room tone, mic hiss) — which a voice changer typically strips out entirely, and
+ * which persists under the speech too, not just before it — dilutes a raw-amplitude correlation across
+ * the whole clip. Onset strength is near zero for both silence and steady noise, so it naturally
+ * ignores both and locks onto the same transients a listener would use to sync the two by ear.
  *
  * The returned offset can be negative (the voice-changed audio's matching content starts before the
  * original's) — callers that only ever trim, never pad, must clamp it to zero themselves.
@@ -50,9 +56,9 @@ export function computeCrossCorrelationOffsetSeconds(
   // regardless of each file's native sample rate, so their window grids already line up in time —
   // the original's window size is used as the shared clock.
   const windowSizeSeconds = originalEnvelope.windowSizeSeconds;
-  const original = normalizeToZScore(originalEnvelope.rootMeanSquarePerWindow);
-  const voiceChanged = normalizeToZScore(voiceChangedEnvelope.rootMeanSquarePerWindow);
-  if (!original || !voiceChanged) return 0; // one side is silent throughout; no meaningful offset to find
+  const original = normalizeToZScore(computeOnsetStrengthEnvelope(originalEnvelope.rootMeanSquarePerWindow));
+  const voiceChanged = normalizeToZScore(computeOnsetStrengthEnvelope(voiceChangedEnvelope.rootMeanSquarePerWindow));
+  if (!original || !voiceChanged) return 0; // one side has no onsets at all; no meaningful offset to find
 
   const minLagWindows = Math.round(searchRangeSeconds.minOffsetSeconds / windowSizeSeconds);
   const maxLagWindows = Math.round(searchRangeSeconds.maxOffsetSeconds / windowSizeSeconds);
