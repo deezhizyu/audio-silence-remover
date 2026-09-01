@@ -1,6 +1,7 @@
 import { applyEdgeFades } from '../applyEdgeFades';
 import { computeAlignmentTrim } from '../computeAlignmentTrim';
 import { computeAmplitudeEnvelope, type AmplitudeEnvelope } from '../computeAmplitudeEnvelope';
+import { computeCrossCorrelationOffsetSeconds } from '../computeCrossCorrelationOffsetSeconds';
 import { decideOutputContainerFormat } from '../decideOutputContainerFormat';
 import { decodeMediaFileAudioTrack } from '../decodeMediaFileAudioTrack';
 import { detectEdgeSilenceDurations } from '../detectEdgeSilenceDurations';
@@ -77,12 +78,12 @@ self.onmessage = (event: MessageEvent<AudioAlignmentWorkerRequest>) => {
 
           const { volumeThresholdPercent, cutEdgeSilenceEnabled } = request;
 
-          const originalEdgeSilence = detectEdgeSilenceDurations(retainedOriginalEnvelope, volumeThresholdPercent);
-          const voiceChangedEdgeSilence = detectEdgeSilenceDurations(retainedVoiceChangedEnvelope, volumeThresholdPercent);
+          // The sync offset comes from correlating the two audio signals directly, not from comparing
+          // where each one crosses the volume threshold — see computeCrossCorrelationOffsetSeconds for why.
+          const correlationOffsetSeconds = computeCrossCorrelationOffsetSeconds(retainedOriginalEnvelope, retainedVoiceChangedEnvelope);
           const alignmentTrim = computeAlignmentTrim({
-            originalLeadingSilenceSeconds: originalEdgeSilence.leadingSilenceSeconds,
+            startTrimSeconds: correlationOffsetSeconds,
             originalAudioDurationSeconds: retainedOriginalAudioDurationSeconds,
-            voiceChangedLeadingSilenceSeconds: voiceChangedEdgeSilence.leadingSilenceSeconds,
             voiceChangedDurationSeconds: retainedVoiceChangedDurationSeconds,
           });
 

@@ -27,12 +27,12 @@ export function AlignmentMetricsPanel({ metrics }: AlignmentMetricsPanelProps) {
 
   return (
     <Card>
-      <SectionHeading title="Alignment preview" description="Recalculated live as you adjust the threshold." />
+      <SectionHeading title="Alignment preview" description="The sync offset is detected by matching the two audio signals, not by the threshold below." />
       <div class="mt-4 flex flex-col gap-2">
-        <MetricRow label="Original leading silence" value={formatSecondsLabel(metrics.originalLeadingSilenceSeconds)} />
-        <MetricRow label="Voice-changed leading silence" value={formatSecondsLabel(metrics.voiceChangedLeadingSilenceSeconds)} />
-        <MetricRow label="Trimmed from start" value={formatSecondsLabel(metrics.startTrimSeconds)} />
-        <MetricRow label="Trimmed from end" value={formatSecondsLabel(metrics.endTrimSeconds)} />
+        <MetricRow label="Original leading silence (below threshold)" value={formatSecondsLabel(metrics.originalLeadingSilenceSeconds)} />
+        <MetricRow label="Voice-changed leading silence (below threshold)" value={formatSecondsLabel(metrics.voiceChangedLeadingSilenceSeconds)} />
+        <MetricRow label="Trimmed from start (detected sync offset)" value={formatSecondsLabel(metrics.startTrimSeconds)} />
+        <MetricRow label="Trimmed from end (to match original duration)" value={formatSecondsLabel(metrics.endTrimSeconds)} />
         <MetricRow
           label="Resulting duration / original"
           value={`${formatSecondsLabel(metrics.resultingDurationSeconds)} / ${formatSecondsLabel(metrics.originalAudioDurationSeconds)}`}

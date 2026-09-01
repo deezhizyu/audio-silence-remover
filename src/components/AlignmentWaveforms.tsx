@@ -46,7 +46,7 @@ export function AlignmentWaveforms({ originalVideoEnvelope, voiceChangedAudioEnv
     <Card>
       <SectionHeading
         title="Waveforms"
-        description="Grey marks detected silence; red marks what export will actually trim from the voice-changed audio."
+        description="Purple marks audio below the silence threshold; red marks what export will actually trim from the voice-changed audio — these can differ, since trimming is based on matching the two signals, not the threshold."
       />
       <div class="mt-4 flex flex-col gap-4">
         <AlignmentSourceWaveform label="Original video audio" envelope={originalVideoEnvelope} highlightRegions={originalHighlights} />

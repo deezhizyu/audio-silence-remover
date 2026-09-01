@@ -1,5 +1,6 @@
 import { signal } from '@preact/signals';
 import { computeAlignmentTrim } from '../audio/computeAlignmentTrim';
+import { computeCrossCorrelationOffsetSeconds } from '../audio/computeCrossCorrelationOffsetSeconds';
 import { deriveAlignedVideoFileName } from '../audio/deriveAlignedVideoFileName';
 import { detectEdgeSilenceDurations } from '../audio/detectEdgeSilenceDurations';
 import { AudioAlignmentWorkerClient } from '../audio/worker/AudioAlignmentWorkerClient';
@@ -62,12 +63,14 @@ function recomputeAlignmentMetrics(): void {
   }
 
   const threshold = volumeThresholdPercent.value;
+  // These leading-silence readouts are informational only (see AlignmentMetrics) — the actual sync
+  // offset below comes from correlating the two signals directly, independent of the threshold.
   const originalEdgeSilence = detectEdgeSilenceDurations(originalEnvelope, threshold);
   const voiceChangedEdgeSilence = detectEdgeSilenceDurations(voiceChangedEnvelope, threshold);
+  const correlationOffsetSeconds = computeCrossCorrelationOffsetSeconds(originalEnvelope, voiceChangedEnvelope);
   const { startTrimSeconds, endTrimSeconds } = computeAlignmentTrim({
-    originalLeadingSilenceSeconds: originalEdgeSilence.leadingSilenceSeconds,
+    startTrimSeconds: correlationOffsetSeconds,
     originalAudioDurationSeconds: retainedOriginalAudioDurationSeconds,
-    voiceChangedLeadingSilenceSeconds: voiceChangedEdgeSilence.leadingSilenceSeconds,
     voiceChangedDurationSeconds: retainedVoiceChangedDurationSeconds,
   });
 
