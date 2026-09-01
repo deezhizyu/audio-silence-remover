@@ -18,7 +18,7 @@ import { Card } from './ui/Card';
 import { RangeControl } from './ui/RangeControl';
 import { SectionHeading } from './ui/SectionHeading';
 
-const OFFSET_RANGE_SECONDS = 10;
+const OFFSET_RANGE_SECONDS = 2;
 const OFFSET_STEP_SECONDS = 0.001;
 
 /** Previews the first matched pair: switch between the video's own native audio ("original") and the
@@ -95,6 +95,7 @@ export function AlignmentPlaybackPreview() {
           step={OFFSET_STEP_SECONDS}
           unit="s"
           onChange={updateOffsetSeconds}
+          enableWheelStep
         />
       </div>
     </Card>
