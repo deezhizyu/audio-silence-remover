@@ -20,7 +20,7 @@ interface AlignmentWaveformsProps {
   voiceChangedAudioEnvelope: SerializedAmplitudeEnvelope;
 }
 
-const ZOOM_WINDOW_SECONDS = 3;
+const ZOOM_WINDOW_SECONDS = 1.5;
 
 /** Canvas 2D's `fillStyle` can't resolve `var(...)` references the way DOM element styles can — colors
     handed to the drawing function must already be concrete, resolved via `getComputedStyle`. */
