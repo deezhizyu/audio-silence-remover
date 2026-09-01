@@ -1,33 +1,24 @@
+import { zipSync } from 'fflate';
 import { applyEdgeFades } from '../applyEdgeFades';
-import { chooseAlignmentEnvelopeWindowSeconds } from '../chooseAlignmentEnvelopeWindowSeconds';
-import { computeAmplitudeEnvelope, type AmplitudeEnvelope } from '../computeAmplitudeEnvelope';
 import { decideOutputContainerFormat } from '../decideOutputContainerFormat';
 import { decodeMediaFileAudioTrack } from '../decodeMediaFileAudioTrack';
+import { deriveAlignedVideoFileName } from '../deriveAlignedVideoFileName';
 import { muxAudioIntoVideoContainer } from '../muxAudioIntoVideoContainer';
 import { shiftAndTrimAudioChannels } from '../shiftAndTrimAudioChannels';
-import type { AudioAlignmentWorkerRequest, AudioAlignmentWorkerResponse } from './audioAlignmentWorkerMessages';
-
-/** Below this, the result of trimming is too short to be a meaningful export (and too short for the edge fades to make sense). */
-const MINIMUM_EXPORTABLE_DURATION_SECONDS = 0.5;
-
-let retainedVideoFile: File | null = null;
-let retainedOriginalEnvelope: AmplitudeEnvelope | null = null;
-
-let retainedVoiceChangedChannelData: Float32Array<ArrayBuffer>[] = [];
-let retainedVoiceChangedSampleRate = 0;
-let retainedVoiceChangedEnvelope: AmplitudeEnvelope | null = null;
-
-function serializeEnvelope(envelope: AmplitudeEnvelope) {
-  return {
-    rootMeanSquarePerWindow: envelope.rootMeanSquarePerWindow.slice(),
-    windowSizeSeconds: envelope.windowSizeSeconds,
-    peakAmplitude: envelope.peakAmplitude,
-    durationSeconds: envelope.durationSeconds,
-  };
-}
+import type { AlignmentBatchPairFailure, AudioAlignmentWorkerRequest, AudioAlignmentWorkerResponse } from './audioAlignmentWorkerMessages';
 
 function respond(response: AudioAlignmentWorkerResponse, transferables: Transferable[] = []): void {
   self.postMessage(response, { transfer: transferables });
+}
+
+async function exportOnePair(videoFile: File, audioFile: File, offsetSeconds: number): Promise<Uint8Array> {
+  const { channelData, sampleRate } = await decodeMediaFileAudioTrack(audioFile);
+  let processedChannelData = shiftAndTrimAudioChannels(channelData, sampleRate, offsetSeconds, 0);
+  processedChannelData = applyEdgeFades(processedChannelData, sampleRate);
+
+  const containerFormat = decideOutputContainerFormat(videoFile.name);
+  const blob = await muxAudioIntoVideoContainer(videoFile, processedChannelData, sampleRate, containerFormat);
+  return new Uint8Array(await blob.arrayBuffer());
 }
 
 self.onmessage = (event: MessageEvent<AudioAlignmentWorkerRequest>) => {
@@ -36,70 +27,38 @@ self.onmessage = (event: MessageEvent<AudioAlignmentWorkerRequest>) => {
   void (async () => {
     try {
       switch (request.type) {
-        case 'loadVideoSource': {
-          const { channelData, sampleRate, durationSeconds } = await decodeMediaFileAudioTrack(request.videoFile);
-          retainedVideoFile = request.videoFile;
-          retainedOriginalEnvelope = computeAmplitudeEnvelope(channelData, sampleRate, chooseAlignmentEnvelopeWindowSeconds(durationSeconds));
-
-          respond({
-            type: 'loadVideoSource',
-            requestId: request.requestId,
-            envelope: serializeEnvelope(retainedOriginalEnvelope),
-            durationSeconds,
-          });
-          break;
-        }
-
-        case 'loadVoiceChangedSource': {
-          const { channelData, sampleRate, durationSeconds } = await decodeMediaFileAudioTrack(request.audioFile);
-          retainedVoiceChangedChannelData = channelData;
-          retainedVoiceChangedSampleRate = sampleRate;
-          retainedVoiceChangedEnvelope = computeAmplitudeEnvelope(channelData, sampleRate, chooseAlignmentEnvelopeWindowSeconds(durationSeconds));
-
-          // The main thread needs the actual PCM to build a playback preview buffer — a fresh copy per
-          // channel, transferred zero-copy, so the transfer doesn't detach the arrays retained above for export.
-          const channelDataForMainThread = channelData.map(channel => channel.slice());
-
+        case 'decodeReferenceAudio': {
+          const { channelData, sampleRate } = await decodeMediaFileAudioTrack(request.audioFile);
+          const channelDataCopy = channelData.map(channel => channel.slice());
           respond(
-            {
-              type: 'loadVoiceChangedSource',
-              requestId: request.requestId,
-              envelope: serializeEnvelope(retainedVoiceChangedEnvelope),
-              durationSeconds,
-              channelData: channelDataForMainThread,
-              sampleRate,
-            },
-            channelDataForMainThread.map(channel => channel.buffer),
+            { type: 'decodeReferenceAudio', requestId: request.requestId, channelData: channelDataCopy, sampleRate },
+            channelDataCopy.map(channel => channel.buffer),
           );
           break;
         }
 
-        case 'exportAlignedVideo': {
-          if (!retainedVideoFile || !retainedOriginalEnvelope || !retainedVoiceChangedEnvelope) {
-            throw new Error('Both a video and a voice-changed audio file must be loaded first.');
+        case 'exportBatch': {
+          const { pairs, offsetSeconds } = request;
+          const zipEntries: Record<string, Uint8Array> = {};
+          const failures: AlignmentBatchPairFailure[] = [];
+
+          for (let index = 0; index < pairs.length; index++) {
+            const pair = pairs[index];
+            try {
+              const fileBytes = await exportOnePair(pair.videoFile, pair.audioFile, offsetSeconds);
+              zipEntries[deriveAlignedVideoFileName(pair.videoFile.name)] = fileBytes;
+            } catch (pairError) {
+              // One bad pair (an undecodable audio file, a video with no usable track) shouldn't abort the
+              // whole batch — record it and keep processing the rest.
+              failures.push({ baseName: pair.baseName, message: pairError instanceof Error ? pairError.message : String(pairError) });
+            }
+            respond({ type: 'exportBatchProgress', requestId: request.requestId, completed: index + 1, total: pairs.length, baseName: pair.baseName });
           }
 
-          const { offsetSeconds, trimStartSeconds, trimEndSeconds } = request;
-
-          let processedChannelData = shiftAndTrimAudioChannels(
-            retainedVoiceChangedChannelData,
-            retainedVoiceChangedSampleRate,
-            offsetSeconds + trimStartSeconds,
-            trimEndSeconds,
-          );
-
-          const finalDurationSeconds = (processedChannelData[0]?.length ?? 0) / retainedVoiceChangedSampleRate;
-          if (finalDurationSeconds < MINIMUM_EXPORTABLE_DURATION_SECONDS) {
-            throw new Error('Not enough audio remains after the offset and trims to export — try adjusting them.');
-          }
-
-          processedChannelData = applyEdgeFades(processedChannelData, retainedVoiceChangedSampleRate);
-
-          const containerFormat = decideOutputContainerFormat(retainedVideoFile.name);
-          const blob = await muxAudioIntoVideoContainer(retainedVideoFile, processedChannelData, retainedVoiceChangedSampleRate, containerFormat);
-          const fileBytes = await blob.arrayBuffer();
-
-          respond({ type: 'exportAlignedVideo', requestId: request.requestId, fileBytes, containerFormat }, [fileBytes]);
+          // Stored, not compressed: every entry is already a compressed video container, so re-compressing
+          // would just burn CPU for no size benefit.
+          const zipFileBytes = zipSync(zipEntries, { level: 0 });
+          respond({ type: 'exportBatch', requestId: request.requestId, zipFileBytes: zipFileBytes.buffer, failures }, [zipFileBytes.buffer]);
           break;
         }
       }

@@ -1,20 +1,20 @@
-import type { VideoContainerFormat } from '../decideOutputContainerFormat';
-import type { SerializedAmplitudeEnvelope } from './workerMessages';
+export interface AlignmentBatchPairInput {
+  baseName: string;
+  videoFile: File;
+  audioFile: File;
+}
+
+export interface AlignmentBatchPairFailure {
+  baseName: string;
+  message: string;
+}
 
 export type AudioAlignmentWorkerRequest =
-  | { type: 'loadVideoSource'; requestId: number; videoFile: File }
-  | { type: 'loadVoiceChangedSource'; requestId: number; audioFile: File }
-  | { type: 'exportAlignedVideo'; requestId: number; offsetSeconds: number; trimStartSeconds: number; trimEndSeconds: number };
+  | { type: 'decodeReferenceAudio'; requestId: number; audioFile: File }
+  | { type: 'exportBatch'; requestId: number; pairs: AlignmentBatchPairInput[]; offsetSeconds: number };
 
 export type AudioAlignmentWorkerResponse =
-  | { type: 'loadVideoSource'; requestId: number; envelope: SerializedAmplitudeEnvelope; durationSeconds: number }
-  | {
-      type: 'loadVoiceChangedSource';
-      requestId: number;
-      envelope: SerializedAmplitudeEnvelope;
-      durationSeconds: number;
-      channelData: Float32Array<ArrayBuffer>[];
-      sampleRate: number;
-    }
-  | { type: 'exportAlignedVideo'; requestId: number; fileBytes: ArrayBuffer; containerFormat: VideoContainerFormat }
+  | { type: 'decodeReferenceAudio'; requestId: number; channelData: Float32Array<ArrayBuffer>[]; sampleRate: number }
+  | { type: 'exportBatchProgress'; requestId: number; completed: number; total: number; baseName: string }
+  | { type: 'exportBatch'; requestId: number; zipFileBytes: ArrayBuffer; failures: AlignmentBatchPairFailure[] }
   | { type: 'error'; requestId: number; message: string };

@@ -5,16 +5,11 @@ import { EDGE_FADE_DURATION_SECONDS } from './applyEdgeFades';
 const SCHEDULING_LEAD_IN_SECONDS = 0.03;
 const POSITION_TRACKING_INTERVAL_MILLISECONDS = 40;
 
-export type AlignmentPlaybackSource = 'original' | 'voiceChanged';
-
 /**
- * Plays back either the original video (picture + its own native audio track, perfectly in sync by
- * construction) or the voice-changed audio (video's picture, muted, alongside the voice-changed buffer
- * scheduled through Web Audio) — never both at once, and always from a shared position on the
- * original video's timeline, so switching source mid-scrub keeps the same playhead position.
- *
- * The voice-changed schedule uses the exact same `offsetSeconds + trimStartSeconds` / `trimEndSeconds`
- * numbers `shiftAndTrimAudioChannels` and `applyEdgeFades` use for the real export — see `playVoiceChanged`.
+ * Plays the reference video's picture (muted) alongside the voice-changed audio, scheduled through Web
+ * Audio with the current offset applied — this previews exactly what the batch export will sound like
+ * for every matched pair, since export applies the same single `offsetSeconds` shift via
+ * `shiftAndTrimAudioChannels` and the same `EDGE_FADE_DURATION_SECONDS` fade.
  */
 export class AlignmentPreviewPlaybackController {
   private readonly audioContext: AudioContext;
@@ -25,12 +20,11 @@ export class AlignmentPreviewPlaybackController {
   private activeGainNode: GainNode | null = null;
   private positionTrackingIntervalId: ReturnType<typeof setInterval> | null = null;
 
-  private activeSource: AlignmentPlaybackSource | null = null;
   private isPlaying = false;
   private lastKnownPositionSeconds = 0;
 
   onTimeUpdate: (positionSeconds: number) => void = () => {};
-  onPlaybackStateChange: (isPlaying: boolean, source: AlignmentPlaybackSource | null) => void = () => {};
+  onPlaybackStateChange: (isPlaying: boolean) => void = () => {};
 
   constructor() {
     this.audioContext = new AudioContext();
@@ -48,32 +42,7 @@ export class AlignmentPreviewPlaybackController {
     return this.isPlaying && this.videoElement ? this.videoElement.currentTime : this.lastKnownPositionSeconds;
   }
 
-  playOriginal(fromSeconds?: number): void {
-    const videoElement = this.videoElement;
-    if (!videoElement) return;
-    if (this.audioContext.state === 'suspended') void this.audioContext.resume();
-
-    this.stopActiveAudioNode();
-    const targetSeconds = fromSeconds ?? this.lastKnownPositionSeconds;
-
-    videoElement.muted = false;
-    videoElement.currentTime = targetSeconds;
-    void videoElement.play();
-
-    this.activeSource = 'original';
-    this.isPlaying = true;
-    this.lastKnownPositionSeconds = targetSeconds;
-    this.onPlaybackStateChange(true, 'original');
-    this.startPositionTracking();
-  }
-
-  /**
-   * `offsetSeconds`/`trimStartSeconds`/`trimEndSeconds` are the literal values the export pipeline uses
-   * (`netStartShiftSeconds = offsetSeconds + trimStartSeconds` fed to `shiftAndTrimAudioChannels`, the
-   * same `EDGE_FADE_DURATION_SECONDS` fade `applyEdgeFades` applies last) — the preview is built from the
-   * same numbers, not a separate approximation of them.
-   */
-  playVoiceChanged(fromSeconds: number | undefined, offsetSeconds: number, trimStartSeconds: number, trimEndSeconds: number): void {
+  play(fromSeconds: number | undefined, offsetSeconds: number): void {
     const videoElement = this.videoElement;
     const buffer = this.voiceChangedBuffer;
     if (!videoElement || !buffer) return;
@@ -82,26 +51,23 @@ export class AlignmentPreviewPlaybackController {
     this.stopActiveAudioNode();
     const targetSeconds = Math.max(0, fromSeconds ?? this.lastKnownPositionSeconds);
 
-    const netStartShiftSeconds = offsetSeconds + trimStartSeconds;
-    const playableDurationSeconds = Math.max(0, buffer.duration - Math.max(0, netStartShiftSeconds) - trimEndSeconds);
-
     videoElement.muted = true;
     videoElement.currentTime = targetSeconds;
     void videoElement.play();
 
-    this.activeSource = 'voiceChanged';
     this.isPlaying = true;
     this.lastKnownPositionSeconds = targetSeconds;
-    this.onPlaybackStateChange(true, 'voiceChanged');
+    this.onPlaybackStateChange(true);
     this.startPositionTracking();
 
+    const playableDurationSeconds = Math.max(0, buffer.duration - Math.max(0, offsetSeconds));
     if (playableDurationSeconds <= 0 || targetSeconds >= playableDurationSeconds) return; // nothing left to schedule — video plays on silently, matching what export would produce
 
-    // How far `targetSeconds` sits into the processed track: negative shifts mean the track's first
-    // `-netStartShiftSeconds` seconds are inserted silence, which the buffer itself doesn't contain.
-    const silenceRemainingSeconds = Math.max(0, -netStartShiftSeconds - targetSeconds);
-    const bufferOffsetSeconds = Math.max(0, targetSeconds + netStartShiftSeconds);
-    const bufferPlayDurationSeconds = buffer.duration - trimEndSeconds - bufferOffsetSeconds;
+    // How far `targetSeconds` sits into the processed track: a negative offset means the track's first
+    // `-offsetSeconds` seconds are inserted silence, which the buffer itself doesn't contain.
+    const silenceRemainingSeconds = Math.max(0, -offsetSeconds - targetSeconds);
+    const bufferOffsetSeconds = Math.max(0, targetSeconds + offsetSeconds);
+    const bufferPlayDurationSeconds = buffer.duration - bufferOffsetSeconds;
     if (bufferPlayDurationSeconds <= 0) return;
 
     // Fade automation is scheduled against the *absolute* start of the processed track (even if that
@@ -135,26 +101,21 @@ export class AlignmentPreviewPlaybackController {
     this.videoElement?.pause();
     this.stopActiveAudioNode();
     this.isPlaying = false;
-    this.onPlaybackStateChange(false, this.activeSource);
+    this.onPlaybackStateChange(false);
     this.onTimeUpdate(this.lastKnownPositionSeconds);
     this.stopPositionTracking();
   }
 
-  /** Seeks to `seconds` on the shared timeline. Restarts playback from there if currently playing (same
-      source), otherwise just moves the tracked position and the video element's own currentTime. */
-  seek(seconds: number, offsetSeconds: number, trimStartSeconds: number, trimEndSeconds: number): void {
-    const wasPlaying = this.isPlaying;
-    const source = this.activeSource;
-
-    if (wasPlaying && source === 'original') {
-      this.playOriginal(seconds);
-    } else if (wasPlaying && source === 'voiceChanged') {
-      this.playVoiceChanged(seconds, offsetSeconds, trimStartSeconds, trimEndSeconds);
-    } else {
-      this.lastKnownPositionSeconds = seconds;
-      if (this.videoElement) this.videoElement.currentTime = seconds;
-      this.onTimeUpdate(seconds);
+  /** Seeks to `seconds`. Restarts playback from there if currently playing, otherwise just moves the
+      tracked position and the video element's own currentTime. */
+  seek(seconds: number, offsetSeconds: number): void {
+    if (this.isPlaying) {
+      this.play(seconds, offsetSeconds);
+      return;
     }
+    this.lastKnownPositionSeconds = seconds;
+    if (this.videoElement) this.videoElement.currentTime = seconds;
+    this.onTimeUpdate(seconds);
   }
 
   dispose(): void {
@@ -189,7 +150,7 @@ export class AlignmentPreviewPlaybackController {
         this.lastKnownPositionSeconds = videoElement.duration || this.lastKnownPositionSeconds;
         this.isPlaying = false;
         this.stopActiveAudioNode();
-        this.onPlaybackStateChange(false, this.activeSource);
+        this.onPlaybackStateChange(false);
         this.onTimeUpdate(this.lastKnownPositionSeconds);
         this.stopPositionTracking();
         return;

@@ -1,47 +1,62 @@
-import { signal } from '@preact/signals';
-import { AlignmentPreviewPlaybackController, type AlignmentPlaybackSource } from '../audio/AlignmentPreviewPlaybackController';
+import { computed, signal } from '@preact/signals';
+import { AlignmentPreviewPlaybackController } from '../audio/AlignmentPreviewPlaybackController';
 import { buildAudioBufferFromChannels } from '../audio/buildAudioBufferFromChannels';
-import { deriveAlignedVideoFileName } from '../audio/deriveAlignedVideoFileName';
 import { AudioAlignmentWorkerClient } from '../audio/worker/AudioAlignmentWorkerClient';
-import type { SerializedAmplitudeEnvelope } from '../audio/worker/workerMessages';
+import type { AlignmentBatchPairFailure, AlignmentBatchPairInput } from '../audio/worker/audioAlignmentWorkerMessages';
 import { downloadBlob } from '../utils/downloadBlob';
 
-export const originalVideoFileName = signal<string | null>(null);
-export const voiceChangedAudioFileName = signal<string | null>(null);
+export interface MatchedAlignmentPair {
+  baseName: string;
+  videoFile: File;
+  audioFile: File;
+}
+
+function fileBaseName(file: File): string {
+  return file.name.replace(/\.[^./\\]+$/, '').trim().toLowerCase();
+}
+
+export const originalVideoFiles = signal<File[]>([]);
+export const voiceChangedAudioFiles = signal<File[]>([]);
+
+/** Pairs matched by filename (ignoring extension and case), sorted for a stable, predictable order. */
+export const matchedPairs = computed<MatchedAlignmentPair[]>(() => {
+  const audioFilesByBaseName = new Map(voiceChangedAudioFiles.value.map(file => [fileBaseName(file), file]));
+  const pairs: MatchedAlignmentPair[] = [];
+  for (const videoFile of originalVideoFiles.value) {
+    const audioFile = audioFilesByBaseName.get(fileBaseName(videoFile));
+    if (audioFile) pairs.push({ baseName: fileBaseName(videoFile), videoFile, audioFile });
+  }
+  return pairs.sort((a, b) => a.baseName.localeCompare(b.baseName));
+});
+
+export const unmatchedVideoFiles = computed<File[]>(() => {
+  const matchedBaseNames = new Set(matchedPairs.value.map(pair => pair.baseName));
+  return originalVideoFiles.value.filter(file => !matchedBaseNames.has(fileBaseName(file)));
+});
+
+export const unmatchedAudioFiles = computed<File[]>(() => {
+  const matchedBaseNames = new Set(matchedPairs.value.map(pair => pair.baseName));
+  return voiceChangedAudioFiles.value.filter(file => !matchedBaseNames.has(fileBaseName(file)));
+});
 
 export const offsetSeconds = signal(0);
-export const trimStartSeconds = signal(0);
-export const trimEndSeconds = signal(0);
 
-/** The point (on the original/shared timeline) the user last clicked to zoom in on — `null` means fully
-    zoomed out, showing each waveform's full duration. */
-export const zoomCenterSeconds = signal<number | null>(null);
+export const isLoadingPreview = signal(false);
+export const previewErrorMessage = signal<string | null>(null);
+/** Feeds the `<video>` element's `src` — an object URL for the reference pair's video file. */
+export const previewVideoObjectUrl = signal<string | null>(null);
 
-export const isLoadingVideoSource = signal(false);
-export const isLoadingVoiceChangedSource = signal(false);
-export const isExportingVideo = signal(false);
-
-/** Kept independent per source (rather than one shared signal) since the two loads run concurrently and
-    resolve in whichever order the browser finishes them — a shared signal would let one load's success
-    silently wipe out the other's still-relevant error, or vice versa. */
-export const videoSourceErrorMessage = signal<string | null>(null);
-export const voiceChangedSourceErrorMessage = signal<string | null>(null);
-export const exportErrorMessage = signal<string | null>(null);
-
-export const originalVideoEnvelope = signal<SerializedAmplitudeEnvelope | null>(null);
-export const voiceChangedAudioEnvelope = signal<SerializedAmplitudeEnvelope | null>(null);
-export const originalVideoDurationSeconds = signal(0);
-export const voiceChangedAudioDurationSeconds = signal(0);
-
-/** Feeds the `<video>` element's `src` — an object URL for the uploaded video file. */
-export const videoObjectUrl = signal<string | null>(null);
-
-export const activePlaybackSource = signal<AlignmentPlaybackSource | null>(null);
 export const isPlaybackPlaying = signal(false);
 export const playbackCurrentTimeSeconds = signal(0);
 
+export const isExportingBatch = signal(false);
+export const exportErrorMessage = signal<string | null>(null);
+export const exportProgress = signal<{ completed: number; total: number } | null>(null);
+export const exportFailures = signal<AlignmentBatchPairFailure[]>([]);
+
 let activeWorkerClient: AudioAlignmentWorkerClient | null = null;
 let activePlaybackController: AlignmentPreviewPlaybackController | null = null;
+let loadedPreviewBaseName: string | null = null;
 
 function ensureWorkerClient(): AudioAlignmentWorkerClient {
   if (!activeWorkerClient) activeWorkerClient = new AudioAlignmentWorkerClient();
@@ -58,9 +73,8 @@ function ensurePlaybackController(): AlignmentPreviewPlaybackController {
   controller.onTimeUpdate = seconds => {
     playbackCurrentTimeSeconds.value = seconds;
   };
-  controller.onPlaybackStateChange = (isPlaying, source) => {
+  controller.onPlaybackStateChange = isPlaying => {
     isPlaybackPlaying.value = isPlaying;
-    if (isPlaying) activePlaybackSource.value = source;
   };
   activePlaybackController = controller;
   return controller;
@@ -70,95 +84,94 @@ export function attachPlaybackVideoElement(videoElement: HTMLVideoElement | null
   ensurePlaybackController().attachVideoElement(videoElement);
 }
 
-export async function loadOriginalVideoFile(file: File): Promise<void> {
-  videoSourceErrorMessage.value = null;
-  isLoadingVideoSource.value = true;
-  originalVideoEnvelope.value = null;
+/** Loads the first matched pair into the reference preview — the video plays natively (its own `src`,
+    no decode needed), and the voice-changed audio is decoded into a Web Audio buffer for offset-shifted
+    scheduling. Re-runs whenever either file list changes, but skips reloading if the first pair is
+    already the one loaded. */
+async function refreshPreviewFromFirstMatchedPair(): Promise<void> {
+  const firstPair = matchedPairs.value[0] ?? null;
 
-  try {
-    const { envelope, durationSeconds } = await ensureWorkerClient().loadVideoSource(file);
-    originalVideoEnvelope.value = envelope;
-    originalVideoDurationSeconds.value = durationSeconds;
-    originalVideoFileName.value = file.name;
-
-    if (videoObjectUrl.value) URL.revokeObjectURL(videoObjectUrl.value);
-    videoObjectUrl.value = URL.createObjectURL(file);
-  } catch (caughtError) {
-    videoSourceErrorMessage.value = caughtError instanceof Error ? caughtError.message : 'Could not read this video file.';
-    originalVideoFileName.value = null;
-  } finally {
-    isLoadingVideoSource.value = false;
+  if (!firstPair) {
+    loadedPreviewBaseName = null;
+    activePlaybackController?.pause();
+    activePlaybackController?.setVoiceChangedBuffer(null);
+    if (previewVideoObjectUrl.value) URL.revokeObjectURL(previewVideoObjectUrl.value);
+    previewVideoObjectUrl.value = null;
+    previewErrorMessage.value = null;
+    return;
   }
-}
 
-export async function loadVoiceChangedAudioFile(file: File): Promise<void> {
-  voiceChangedSourceErrorMessage.value = null;
-  isLoadingVoiceChangedSource.value = true;
-  voiceChangedAudioEnvelope.value = null;
+  if (firstPair.baseName === loadedPreviewBaseName) return;
+  loadedPreviewBaseName = firstPair.baseName;
+
+  previewErrorMessage.value = null;
+  isLoadingPreview.value = true;
+  ensurePlaybackController().pause();
   ensurePlaybackController().setVoiceChangedBuffer(null);
 
   try {
-    const { envelope, durationSeconds, channelData, sampleRate } = await ensureWorkerClient().loadVoiceChangedSource(file);
-    voiceChangedAudioEnvelope.value = envelope;
-    voiceChangedAudioDurationSeconds.value = durationSeconds;
-    voiceChangedAudioFileName.value = file.name;
+    if (previewVideoObjectUrl.value) URL.revokeObjectURL(previewVideoObjectUrl.value);
+    previewVideoObjectUrl.value = URL.createObjectURL(firstPair.videoFile);
+
+    const { channelData, sampleRate } = await ensureWorkerClient().decodeReferenceAudio(firstPair.audioFile);
     ensurePlaybackController().setVoiceChangedBuffer(buildAudioBufferFromChannels(channelData, sampleRate));
   } catch (caughtError) {
-    voiceChangedSourceErrorMessage.value = caughtError instanceof Error ? caughtError.message : 'Could not read this audio file.';
-    voiceChangedAudioFileName.value = null;
+    previewErrorMessage.value = caughtError instanceof Error ? caughtError.message : 'Could not load this pair for preview.';
   } finally {
-    isLoadingVoiceChangedSource.value = false;
+    isLoadingPreview.value = false;
   }
+}
+
+export function setOriginalVideoFiles(files: File[]): void {
+  originalVideoFiles.value = files;
+  void refreshPreviewFromFirstMatchedPair();
+}
+
+export function setVoiceChangedAudioFiles(files: File[]): void {
+  voiceChangedAudioFiles.value = files;
+  void refreshPreviewFromFirstMatchedPair();
 }
 
 export function updateOffsetSeconds(seconds: number): void {
   offsetSeconds.value = seconds;
 }
 
-export function updateTrimStartSeconds(seconds: number): void {
-  trimStartSeconds.value = seconds;
+export function playPreview(fromSeconds?: number): void {
+  ensurePlaybackController().play(fromSeconds, offsetSeconds.value);
 }
 
-export function updateTrimEndSeconds(seconds: number): void {
-  trimEndSeconds.value = seconds;
-}
-
-export function setZoomCenterSeconds(seconds: number | null): void {
-  zoomCenterSeconds.value = seconds;
-}
-
-export function playOriginalAudio(fromSeconds?: number): void {
-  ensurePlaybackController().playOriginal(fromSeconds);
-}
-
-export function playVoiceChangedAudio(fromSeconds?: number): void {
-  ensurePlaybackController().playVoiceChanged(fromSeconds, offsetSeconds.value, trimStartSeconds.value, trimEndSeconds.value);
-}
-
-export function pausePlayback(): void {
+export function pausePreview(): void {
   activePlaybackController?.pause();
 }
 
-export function seekPlayback(seconds: number): void {
-  ensurePlaybackController().seek(seconds, offsetSeconds.value, trimStartSeconds.value, trimEndSeconds.value);
+export function seekPreview(seconds: number): void {
+  ensurePlaybackController().seek(seconds, offsetSeconds.value);
 }
 
-export async function exportAlignedVideo(): Promise<void> {
-  const workerClient = activeWorkerClient;
-  const fileName = originalVideoFileName.value;
-  if (!workerClient || !fileName || !voiceChangedAudioFileName.value) return;
+export async function exportBatch(): Promise<void> {
+  const pairs: AlignmentBatchPairInput[] = matchedPairs.value.map(({ baseName, videoFile, audioFile }) => ({ baseName, videoFile, audioFile }));
+  if (pairs.length === 0) return;
 
   exportErrorMessage.value = null;
-  isExportingVideo.value = true;
+  exportFailures.value = [];
+  exportProgress.value = { completed: 0, total: pairs.length };
+  isExportingBatch.value = true;
 
   try {
-    const { fileBytes, containerFormat } = await workerClient.exportAlignedVideo(offsetSeconds.value, trimStartSeconds.value, trimEndSeconds.value);
-    const mimeType = containerFormat === 'mov' ? 'video/quicktime' : 'video/mp4';
-    downloadBlob(new Blob([fileBytes], { type: mimeType }), deriveAlignedVideoFileName(fileName));
+    const { zipFileBytes, failures } = await ensureWorkerClient().exportBatch(pairs, offsetSeconds.value, (completed, total) => {
+      exportProgress.value = { completed, total };
+    });
+    exportFailures.value = failures;
+    if (failures.length < pairs.length) {
+      downloadBlob(new Blob([zipFileBytes], { type: 'application/zip' }), 'aligned-videos.zip');
+    } else {
+      exportErrorMessage.value = 'Every pair in this batch failed to export — see the errors below.';
+    }
   } catch (caughtError) {
-    exportErrorMessage.value = caughtError instanceof Error ? caughtError.message : 'Could not export this video.';
+    exportErrorMessage.value = caughtError instanceof Error ? caughtError.message : 'Could not process this batch.';
   } finally {
-    isExportingVideo.value = false;
+    isExportingBatch.value = false;
+    exportProgress.value = null;
   }
 }
 
@@ -167,26 +180,19 @@ export function resetAudioAlignmentSession(): void {
   activeWorkerClient = null;
   activePlaybackController?.pause();
   activePlaybackController?.setVoiceChangedBuffer(null);
-  if (videoObjectUrl.value) URL.revokeObjectURL(videoObjectUrl.value);
+  if (previewVideoObjectUrl.value) URL.revokeObjectURL(previewVideoObjectUrl.value);
+  loadedPreviewBaseName = null;
 
-  originalVideoFileName.value = null;
-  voiceChangedAudioFileName.value = null;
-  originalVideoEnvelope.value = null;
-  voiceChangedAudioEnvelope.value = null;
-  originalVideoDurationSeconds.value = 0;
-  voiceChangedAudioDurationSeconds.value = 0;
-  videoObjectUrl.value = null;
+  originalVideoFiles.value = [];
+  voiceChangedAudioFiles.value = [];
   offsetSeconds.value = 0;
-  trimStartSeconds.value = 0;
-  trimEndSeconds.value = 0;
-  zoomCenterSeconds.value = null;
-  activePlaybackSource.value = null;
+  isLoadingPreview.value = false;
+  previewErrorMessage.value = null;
+  previewVideoObjectUrl.value = null;
   isPlaybackPlaying.value = false;
   playbackCurrentTimeSeconds.value = 0;
-  isLoadingVideoSource.value = false;
-  isLoadingVoiceChangedSource.value = false;
-  isExportingVideo.value = false;
-  videoSourceErrorMessage.value = null;
-  voiceChangedSourceErrorMessage.value = null;
+  isExportingBatch.value = false;
   exportErrorMessage.value = null;
+  exportProgress.value = null;
+  exportFailures.value = [];
 }

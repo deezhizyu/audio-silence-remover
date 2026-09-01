@@ -1,29 +1,29 @@
 import { useEffect, useRef } from 'preact/hooks';
 import { formatDurationClock } from '../utils/formatNumbers';
 import {
-  activePlaybackSource,
   attachPlaybackVideoElement,
   isPlaybackPlaying,
-  originalVideoDurationSeconds,
-  pausePlayback,
+  offsetSeconds,
+  pausePreview,
   playbackCurrentTimeSeconds,
-  playOriginalAudio,
-  playVoiceChangedAudio,
-  seekPlayback,
-  videoObjectUrl,
+  playPreview,
+  previewVideoObjectUrl,
+  seekPreview,
+  updateOffsetSeconds,
 } from '../state/audioAlignmentSignals';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
+import { RangeControl } from './ui/RangeControl';
+import { SectionHeading } from './ui/SectionHeading';
 
-interface AlignmentPlaybackPreviewProps {
-  voiceChangedReady: boolean;
-}
+const OFFSET_RANGE_SECONDS = 10;
 
-/** The video's picture plays under whichever audio source is selected — never both at once. "Original"
-    plays the video's own native embedded audio track; "Voice-changed" mutes the video and instead
-    schedules the voice-changed buffer through Web Audio, using the current offset/trim values (see
-    AlignmentPreviewPlaybackController). Switching sources mid-playback keeps the same position. */
-export function AlignmentPlaybackPreview({ voiceChangedReady }: AlignmentPlaybackPreviewProps) {
+/** Previews the first matched pair: the video's picture always plays muted alongside the voice-changed
+    audio, scheduled with the current offset — there's no toggle back to the original audio, since the
+    point of this preview is to check the swapped-in audio lines up, not to compare the two. Sized to a
+    sane, fixed width rather than stretched to match a sibling panel — there's nothing beside it to match
+    anymore. */
+export function AlignmentPlaybackPreview() {
   const videoElementRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -31,63 +31,53 @@ export function AlignmentPlaybackPreview({ voiceChangedReady }: AlignmentPlaybac
     return () => attachPlaybackVideoElement(null);
   }, []);
 
-  const activeSource = activePlaybackSource.value;
   const isPlaying = isPlaybackPlaying.value;
-  const videoSrc = videoObjectUrl.value;
+  const videoSrc = previewVideoObjectUrl.value;
 
-  const handleToggleOriginal = () => {
-    if (activeSource === 'original' && isPlaying) {
-      pausePlayback();
+  const handleTogglePlayback = () => {
+    if (isPlaying) {
+      pausePreview();
     } else {
-      playOriginalAudio();
-    }
-  };
-
-  const handleToggleVoiceChanged = () => {
-    if (activeSource === 'voiceChanged' && isPlaying) {
-      pausePlayback();
-    } else {
-      playVoiceChangedAudio();
+      playPreview();
     }
   };
 
   const handleRestart = () => {
-    seekPlayback(0);
-    if (activeSource === 'voiceChanged') {
-      playVoiceChangedAudio(0);
-    } else {
-      playOriginalAudio(0);
-    }
+    seekPreview(0);
+    playPreview(0);
   };
 
   return (
-    <Card class="flex h-full flex-col">
+    <Card>
+      <SectionHeading title="Preview" description="Plays the first matched pair — drag the offset until the audio lines up with the picture." />
       <video
         ref={videoElementRef}
         src={videoSrc ?? undefined}
-        class="min-h-0 w-full flex-1 rounded-lg border border-border-subtle bg-black object-contain"
+        class="mx-auto mt-4 block max-h-[420px] w-auto max-w-full rounded-lg border border-border-subtle bg-black"
         playsInline
         muted
       />
 
-      <div class="mt-4 flex flex-shrink-0 flex-wrap items-center gap-2">
+      <div class="mt-4 flex flex-wrap items-center gap-2">
         <Button variant="ghost" onClick={handleRestart}>
           ⏮ Restart
         </Button>
-        <Button variant={activeSource === 'original' && isPlaying ? 'primary' : 'secondary'} onClick={handleToggleOriginal}>
-          {activeSource === 'original' && isPlaying ? 'Pause' : 'Play'} original
+        <Button variant={isPlaying ? 'primary' : 'secondary'} onClick={handleTogglePlayback}>
+          {isPlaying ? 'Pause' : 'Play'}
         </Button>
-        <Button
-          variant={activeSource === 'voiceChanged' && isPlaying ? 'primary' : 'secondary'}
-          onClick={handleToggleVoiceChanged}
-          disabled={!voiceChangedReady}
-        >
-          {activeSource === 'voiceChanged' && isPlaying ? 'Pause' : 'Play'} voice-changed
-        </Button>
-        <span class="ml-auto font-mono text-xs tabular-nums text-text-secondary">
-          {formatDurationClock(playbackCurrentTimeSeconds.value)}
-          <span class="text-text-tertiary"> / {formatDurationClock(originalVideoDurationSeconds.value)}</span>
-        </span>
+        <span class="ml-auto font-mono text-xs tabular-nums text-text-secondary">{formatDurationClock(playbackCurrentTimeSeconds.value)}</span>
+      </div>
+
+      <div class="mt-5">
+        <RangeControl
+          label="Offset"
+          value={offsetSeconds.value}
+          min={-OFFSET_RANGE_SECONDS}
+          max={OFFSET_RANGE_SECONDS}
+          step={0.01}
+          unit="s"
+          onChange={updateOffsetSeconds}
+        />
       </div>
     </Card>
   );

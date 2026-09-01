@@ -1,32 +1,35 @@
-import type { VideoContainerFormat } from '../decideOutputContainerFormat';
-import type { AudioAlignmentWorkerRequest, AudioAlignmentWorkerResponse } from './audioAlignmentWorkerMessages';
-import type { SerializedAmplitudeEnvelope } from './workerMessages';
+import type {
+  AlignmentBatchPairFailure,
+  AlignmentBatchPairInput,
+  AudioAlignmentWorkerRequest,
+  AudioAlignmentWorkerResponse,
+} from './audioAlignmentWorkerMessages';
 
-export interface LoadVideoSourceResult {
-  envelope: SerializedAmplitudeEnvelope;
-  durationSeconds: number;
-}
-
-export interface LoadVoiceChangedSourceResult {
-  envelope: SerializedAmplitudeEnvelope;
-  durationSeconds: number;
+export interface DecodeReferenceAudioResult {
   channelData: Float32Array<ArrayBuffer>[];
   sampleRate: number;
 }
 
-export interface ExportAlignedVideoResult {
-  fileBytes: ArrayBuffer;
-  containerFormat: VideoContainerFormat;
+export interface ExportBatchResult {
+  zipFileBytes: ArrayBuffer;
+  failures: AlignmentBatchPairFailure[];
 }
 
-/** Thin promise-based wrapper around the audio alignment Web Worker; one instance per alignment session. */
+export type ExportBatchProgressCallback = (completed: number, total: number, baseName: string) => void;
+
+interface PendingRequest {
+  resolve: (response: AudioAlignmentWorkerResponse) => void;
+  reject: (error: Error) => void;
+  onProgress?: ExportBatchProgressCallback;
+}
+
+/** Thin promise-based wrapper around the audio alignment Web Worker; one instance per alignment session.
+    `exportBatch` is long-running, so the worker also sends non-terminal `exportBatchProgress` messages for
+    the same request — those are routed to the caller's progress callback without resolving the promise. */
 export class AudioAlignmentWorkerClient {
   private readonly worker: Worker;
   private nextRequestId = 0;
-  private readonly pendingRequests = new Map<
-    number,
-    { resolve: (response: AudioAlignmentWorkerResponse) => void; reject: (error: Error) => void }
-  >();
+  private readonly pendingRequests = new Map<number, PendingRequest>();
 
   constructor() {
     this.worker = new Worker(new URL('./audioAlignmentWorker.ts', import.meta.url), { type: 'module' });
@@ -36,8 +39,13 @@ export class AudioAlignmentWorkerClient {
   private handleResponse(response: AudioAlignmentWorkerResponse): void {
     const pendingRequest = this.pendingRequests.get(response.requestId);
     if (!pendingRequest) return;
-    this.pendingRequests.delete(response.requestId);
 
+    if (response.type === 'exportBatchProgress') {
+      pendingRequest.onProgress?.(response.completed, response.total, response.baseName);
+      return;
+    }
+
+    this.pendingRequests.delete(response.requestId);
     if (response.type === 'error') {
       pendingRequest.reject(new Error(response.message));
     } else {
@@ -45,37 +53,29 @@ export class AudioAlignmentWorkerClient {
     }
   }
 
-  private sendRequest(request: AudioAlignmentWorkerRequest, transferables: Transferable[] = []): Promise<AudioAlignmentWorkerResponse> {
+  private sendRequest(
+    request: AudioAlignmentWorkerRequest,
+    transferables: Transferable[] = [],
+    onProgress?: ExportBatchProgressCallback,
+  ): Promise<AudioAlignmentWorkerResponse> {
     return new Promise((resolve, reject) => {
-      this.pendingRequests.set(request.requestId, { resolve, reject });
+      this.pendingRequests.set(request.requestId, { resolve, reject, onProgress });
       this.worker.postMessage(request, transferables);
     });
   }
 
-  async loadVideoSource(videoFile: File): Promise<LoadVideoSourceResult> {
+  async decodeReferenceAudio(audioFile: File): Promise<DecodeReferenceAudioResult> {
     const requestId = this.nextRequestId++;
-    const response = await this.sendRequest({ type: 'loadVideoSource', requestId, videoFile });
-    if (response.type !== 'loadVideoSource') throw new Error('Unexpected response to loadVideoSource.');
-    return { envelope: response.envelope, durationSeconds: response.durationSeconds };
+    const response = await this.sendRequest({ type: 'decodeReferenceAudio', requestId, audioFile });
+    if (response.type !== 'decodeReferenceAudio') throw new Error('Unexpected response to decodeReferenceAudio.');
+    return { channelData: response.channelData, sampleRate: response.sampleRate };
   }
 
-  async loadVoiceChangedSource(audioFile: File): Promise<LoadVoiceChangedSourceResult> {
+  async exportBatch(pairs: AlignmentBatchPairInput[], offsetSeconds: number, onProgress?: ExportBatchProgressCallback): Promise<ExportBatchResult> {
     const requestId = this.nextRequestId++;
-    const response = await this.sendRequest({ type: 'loadVoiceChangedSource', requestId, audioFile });
-    if (response.type !== 'loadVoiceChangedSource') throw new Error('Unexpected response to loadVoiceChangedSource.');
-    return {
-      envelope: response.envelope,
-      durationSeconds: response.durationSeconds,
-      channelData: response.channelData,
-      sampleRate: response.sampleRate,
-    };
-  }
-
-  async exportAlignedVideo(offsetSeconds: number, trimStartSeconds: number, trimEndSeconds: number): Promise<ExportAlignedVideoResult> {
-    const requestId = this.nextRequestId++;
-    const response = await this.sendRequest({ type: 'exportAlignedVideo', requestId, offsetSeconds, trimStartSeconds, trimEndSeconds });
-    if (response.type !== 'exportAlignedVideo') throw new Error('Unexpected response to exportAlignedVideo.');
-    return { fileBytes: response.fileBytes, containerFormat: response.containerFormat };
+    const response = await this.sendRequest({ type: 'exportBatch', requestId, pairs, offsetSeconds }, [], onProgress);
+    if (response.type !== 'exportBatch') throw new Error('Unexpected response to exportBatch.');
+    return { zipFileBytes: response.zipFileBytes, failures: response.failures };
   }
 
   terminate(): void {

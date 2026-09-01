@@ -23,6 +23,7 @@
     "@mediabunny/aac-encoder": "^1.55.5",
     "@mediabunny/mp3-encoder": "^1.53.0",
     "@preact/signals": "^2.11.0",
+    "fflate": "^0.8.2",
     "mediabunny": "^1.53.0",
     "preact": "^10.29.8",
     "preact-iso": "^2.12.2"

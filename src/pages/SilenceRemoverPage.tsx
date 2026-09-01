@@ -35,8 +35,9 @@ import {
   uploadedFileName,
 } from '../state/signals';
 
-function handleFileSelected(file: File): void {
-  void loadAudioFile(file);
+function handleFilesSelected(files: File[]): void {
+  const file = files[0];
+  if (file) void loadAudioFile(file);
 }
 
 function handleDownload(): void {
@@ -77,7 +78,7 @@ export function SilenceRemoverPage() {
       {!isFileLoaded && (
         <div class="flex flex-col gap-4">
           <div style={fadeUpEntranceStyle(1)}>
-            <Dropzone onFileSelected={handleFileSelected} disabled={isAnalyzing} />
+            <Dropzone onFilesSelected={handleFilesSelected} disabled={isAnalyzing} />
           </div>
           {isAnalyzing && <p class="text-center text-xs text-text-tertiary">Analyzing audio and choosing starting defaults…</p>}
           {errorMessage.value && <p class="text-center text-xs text-danger">{errorMessage.value}</p>}
