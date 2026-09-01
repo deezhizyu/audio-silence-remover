@@ -1,4 +1,5 @@
 import type { AmplitudeEnvelope } from './computeAmplitudeEnvelope';
+import { computeAmplitudeThreshold } from './computeAmplitudeThreshold';
 import { runLengthEncodeSilence, silenceRunDurationSeconds, type SilenceRun } from './runLengthEncodeSilence';
 import type { DetectionConfig, SilenceCategoryKey, SilenceRegion } from './types';
 
@@ -104,7 +105,7 @@ function mergeBriefAudioIntoSurroundingSilence(
 }
 
 export function detectSilenceRegions(envelope: AmplitudeEnvelope, config: DetectionConfig): SilenceRegion[] {
-  const amplitudeThreshold = (config.volumeThresholdPercent / 100) * envelope.peakAmplitude;
+  const amplitudeThreshold = computeAmplitudeThreshold(envelope, config.volumeThresholdPercent);
   const isSilentPerWindow = Array.from(envelope.rootMeanSquarePerWindow, value => value < amplitudeThreshold);
 
   const rawRuns = runLengthEncodeSilence(isSilentPerWindow);

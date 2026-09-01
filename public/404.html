@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Redirecting…</title>
+    <script>
+      // GitHub Pages serves this file (instead of a 404) for any path it doesn't recognize as a real
+      // file — which includes every client-side route this single-page app defines. Stash the path the
+      // visitor actually wanted and bounce to the app shell; src/main.tsx restores it before the router
+      // mounts, so a hard refresh or a shared link to a specific page keeps working.
+      sessionStorage.setItem('redirectPath', location.pathname + location.search + location.hash);
+      var repoBasePath = '/' + location.pathname.split('/')[1] + '/';
+      location.replace(repoBasePath);
+    </script>
+  </head>
+  <body></body>
+</html>

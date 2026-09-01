@@ -1,21 +1,7 @@
 import { describe, expect, test } from 'vitest';
-import type { AmplitudeEnvelope } from './computeAmplitudeEnvelope';
 import { detectSilenceRegions } from './detectSilenceRegions';
+import { buildSyntheticEnvelope as buildEnvelope } from './testHelpers/buildSyntheticEnvelope';
 import type { DetectionConfig, SilenceRegion } from './types';
-
-const WINDOW_SIZE_SECONDS = 0.1;
-const PEAK_AMPLITUDE = 1;
-
-/** Builds a synthetic envelope from segments of (rms value, window count), each window WINDOW_SIZE_SECONDS long. */
-function buildEnvelope(segments: Array<[rms: number, windowCount: number]>): AmplitudeEnvelope {
-  const values = segments.flatMap(([rms, windowCount]) => Array.from({ length: windowCount }, () => rms));
-  return {
-    rootMeanSquarePerWindow: Float32Array.from(values),
-    windowSizeSeconds: WINDOW_SIZE_SECONDS,
-    peakAmplitude: PEAK_AMPLITUDE,
-    durationSeconds: values.length * WINDOW_SIZE_SECONDS,
-  };
-}
 
 /** Rounds region boundaries to avoid asserting on floating-point accumulation noise from repeated window-size addition. */
 function roundRegions(regions: SilenceRegion[]): SilenceRegion[] {

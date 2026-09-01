@@ -5,9 +5,18 @@ import { Button } from './ui/Button';
 interface DropzoneProps {
   onFileSelected: (file: File) => void;
   disabled?: boolean;
+  accept?: string;
+  heading?: string;
+  subtext?: string;
 }
 
-export function Dropzone({ onFileSelected, disabled = false }: DropzoneProps) {
+export function Dropzone({
+  onFileSelected,
+  disabled = false,
+  accept = 'audio/*',
+  heading = 'Drop an audio file here',
+  subtext = 'or choose a file — everything runs on this device, nothing is uploaded',
+}: DropzoneProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
 
@@ -54,14 +63,14 @@ export function Dropzone({ onFileSelected, disabled = false }: DropzoneProps) {
       </div>
 
       <div>
-        <p class="text-sm font-medium text-text-primary">Drop an audio file here</p>
-        <p class="mt-1 text-xs text-text-tertiary">or choose a file — everything runs on this device, nothing is uploaded</p>
+        <p class="text-sm font-medium text-text-primary">{heading}</p>
+        <p class="mt-1 text-xs text-text-tertiary">{subtext}</p>
       </div>
 
       <Button variant="primary" onClick={() => fileInputRef.current?.click()} disabled={disabled}>
         Choose file
       </Button>
-      <input ref={fileInputRef} type="file" accept="audio/*" class="hidden" onChange={handleFileInputChange} disabled={disabled} />
+      <input ref={fileInputRef} type="file" accept={accept} class="hidden" onChange={handleFileInputChange} disabled={disabled} />
     </div>
   );
 }
