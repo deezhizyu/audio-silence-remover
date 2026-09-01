@@ -26,16 +26,25 @@ export const cutEdgeSilenceEnabled = signal(false);
 export const isLoadingVideoSource = signal(false);
 export const isLoadingVoiceChangedSource = signal(false);
 export const isExportingVideo = signal(false);
-export const errorMessage = signal<string | null>(null);
+
+/** Kept independent per source (rather than one shared signal) since the two loads run concurrently and
+    resolve in whichever order the browser finishes them — a shared signal would let one load's success
+    silently wipe out the other's still-relevant error, or vice versa. */
+export const videoSourceErrorMessage = signal<string | null>(null);
+export const voiceChangedSourceErrorMessage = signal<string | null>(null);
+export const exportErrorMessage = signal<string | null>(null);
 
 /** Live preview only — reflects the alignment trim (step 1), not the optional extra edge-silence trim
     applied at export time, since that step needs the actual trimmed PCM, which stays worker-side. */
 export const alignmentMetrics = signal<AlignmentMetrics | null>(null);
 
+/** The envelopes the worker computed on load — exported (rather than kept as plain closure locals) so
+    the page can render them as waveforms, in addition to their internal use recomputing metrics. */
+export const originalVideoEnvelope = signal<SerializedAmplitudeEnvelope | null>(null);
+export const voiceChangedAudioEnvelope = signal<SerializedAmplitudeEnvelope | null>(null);
+
 let activeWorkerClient: AudioAlignmentWorkerClient | null = null;
-let retainedOriginalEnvelope: SerializedAmplitudeEnvelope | null = null;
 let retainedOriginalAudioDurationSeconds = 0;
-let retainedVoiceChangedEnvelope: SerializedAmplitudeEnvelope | null = null;
 let retainedVoiceChangedDurationSeconds = 0;
 let metricsRecomputeTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -45,14 +54,16 @@ function ensureWorkerClient(): AudioAlignmentWorkerClient {
 }
 
 function recomputeAlignmentMetrics(): void {
-  if (!retainedOriginalEnvelope || !retainedVoiceChangedEnvelope) {
+  const originalEnvelope = originalVideoEnvelope.value;
+  const voiceChangedEnvelope = voiceChangedAudioEnvelope.value;
+  if (!originalEnvelope || !voiceChangedEnvelope) {
     alignmentMetrics.value = null;
     return;
   }
 
   const threshold = volumeThresholdPercent.value;
-  const originalEdgeSilence = detectEdgeSilenceDurations(retainedOriginalEnvelope, threshold);
-  const voiceChangedEdgeSilence = detectEdgeSilenceDurations(retainedVoiceChangedEnvelope, threshold);
+  const originalEdgeSilence = detectEdgeSilenceDurations(originalEnvelope, threshold);
+  const voiceChangedEdgeSilence = detectEdgeSilenceDurations(voiceChangedEnvelope, threshold);
   const { startTrimSeconds, endTrimSeconds } = computeAlignmentTrim({
     originalLeadingSilenceSeconds: originalEdgeSilence.leadingSilenceSeconds,
     originalAudioDurationSeconds: retainedOriginalAudioDurationSeconds,
@@ -80,19 +91,19 @@ function scheduleMetricsRecompute(): void {
 }
 
 export async function loadOriginalVideoFile(file: File): Promise<void> {
-  errorMessage.value = null;
+  videoSourceErrorMessage.value = null;
   isLoadingVideoSource.value = true;
-  retainedOriginalEnvelope = null;
+  originalVideoEnvelope.value = null;
   alignmentMetrics.value = null;
 
   try {
     const { envelope, durationSeconds } = await ensureWorkerClient().loadVideoSource(file);
-    retainedOriginalEnvelope = envelope;
+    originalVideoEnvelope.value = envelope;
     retainedOriginalAudioDurationSeconds = durationSeconds;
     originalVideoFileName.value = file.name;
     recomputeAlignmentMetrics();
   } catch (caughtError) {
-    errorMessage.value = caughtError instanceof Error ? caughtError.message : 'Could not read this video file.';
+    videoSourceErrorMessage.value = caughtError instanceof Error ? caughtError.message : 'Could not read this video file.';
     originalVideoFileName.value = null;
   } finally {
     isLoadingVideoSource.value = false;
@@ -100,19 +111,19 @@ export async function loadOriginalVideoFile(file: File): Promise<void> {
 }
 
 export async function loadVoiceChangedAudioFile(file: File): Promise<void> {
-  errorMessage.value = null;
+  voiceChangedSourceErrorMessage.value = null;
   isLoadingVoiceChangedSource.value = true;
-  retainedVoiceChangedEnvelope = null;
+  voiceChangedAudioEnvelope.value = null;
   alignmentMetrics.value = null;
 
   try {
     const { envelope, durationSeconds } = await ensureWorkerClient().loadVoiceChangedSource(file);
-    retainedVoiceChangedEnvelope = envelope;
+    voiceChangedAudioEnvelope.value = envelope;
     retainedVoiceChangedDurationSeconds = durationSeconds;
     voiceChangedAudioFileName.value = file.name;
     recomputeAlignmentMetrics();
   } catch (caughtError) {
-    errorMessage.value = caughtError instanceof Error ? caughtError.message : 'Could not read this audio file.';
+    voiceChangedSourceErrorMessage.value = caughtError instanceof Error ? caughtError.message : 'Could not read this audio file.';
     voiceChangedAudioFileName.value = null;
   } finally {
     isLoadingVoiceChangedSource.value = false;
@@ -133,7 +144,7 @@ export async function exportAlignedVideo(): Promise<void> {
   const fileName = originalVideoFileName.value;
   if (!workerClient || !fileName || !voiceChangedAudioFileName.value) return;
 
-  errorMessage.value = null;
+  exportErrorMessage.value = null;
   isExportingVideo.value = true;
 
   try {
@@ -141,7 +152,7 @@ export async function exportAlignedVideo(): Promise<void> {
     const mimeType = containerFormat === 'mov' ? 'video/quicktime' : 'video/mp4';
     downloadBlob(new Blob([fileBytes], { type: mimeType }), deriveAlignedVideoFileName(fileName));
   } catch (caughtError) {
-    errorMessage.value = caughtError instanceof Error ? caughtError.message : 'Could not export this video.';
+    exportErrorMessage.value = caughtError instanceof Error ? caughtError.message : 'Could not export this video.';
   } finally {
     isExportingVideo.value = false;
   }
@@ -150,9 +161,7 @@ export async function exportAlignedVideo(): Promise<void> {
 export function resetAudioAlignmentSession(): void {
   activeWorkerClient?.terminate();
   activeWorkerClient = null;
-  retainedOriginalEnvelope = null;
   retainedOriginalAudioDurationSeconds = 0;
-  retainedVoiceChangedEnvelope = null;
   retainedVoiceChangedDurationSeconds = 0;
   if (metricsRecomputeTimeoutId !== null) {
     clearTimeout(metricsRecomputeTimeoutId);
@@ -161,11 +170,15 @@ export function resetAudioAlignmentSession(): void {
 
   originalVideoFileName.value = null;
   voiceChangedAudioFileName.value = null;
+  originalVideoEnvelope.value = null;
+  voiceChangedAudioEnvelope.value = null;
   volumeThresholdPercent.value = DEFAULT_VOLUME_THRESHOLD_PERCENT;
   cutEdgeSilenceEnabled.value = false;
   isLoadingVideoSource.value = false;
   isLoadingVoiceChangedSource.value = false;
   isExportingVideo.value = false;
-  errorMessage.value = null;
+  videoSourceErrorMessage.value = null;
+  voiceChangedSourceErrorMessage.value = null;
+  exportErrorMessage.value = null;
   alignmentMetrics.value = null;
 }

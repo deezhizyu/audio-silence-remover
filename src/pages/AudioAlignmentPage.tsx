@@ -1,4 +1,5 @@
 import { AlignmentMetricsPanel } from '../components/AlignmentMetricsPanel';
+import { AlignmentWaveforms } from '../components/AlignmentWaveforms';
 import { Dropzone } from '../components/Dropzone';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -9,18 +10,22 @@ import { fadeUpEntranceStyle } from '../utils/fadeUpEntranceStyle';
 import {
   alignmentMetrics,
   cutEdgeSilenceEnabled,
-  errorMessage,
   exportAlignedVideo,
+  exportErrorMessage,
   isExportingVideo,
   isLoadingVideoSource,
   isLoadingVoiceChangedSource,
   loadOriginalVideoFile,
   loadVoiceChangedAudioFile,
+  originalVideoEnvelope,
   originalVideoFileName,
   resetAudioAlignmentSession,
   setCutEdgeSilenceEnabled,
   updateVolumeThresholdPercent,
+  voiceChangedAudioEnvelope,
   voiceChangedAudioFileName,
+  voiceChangedSourceErrorMessage,
+  videoSourceErrorMessage,
   volumeThresholdPercent,
 } from '../state/audioAlignmentSignals';
 
@@ -39,7 +44,9 @@ function handleExport(): void {
 export function AudioAlignmentPage() {
   const videoFileName = originalVideoFileName.value;
   const audioFileName = voiceChangedAudioFileName.value;
-  const bothSourcesLoaded = videoFileName !== null && audioFileName !== null;
+  const originalEnvelope = originalVideoEnvelope.value;
+  const voiceChangedEnvelope = voiceChangedAudioEnvelope.value;
+  const bothSourcesLoaded = videoFileName !== null && audioFileName !== null && originalEnvelope !== null && voiceChangedEnvelope !== null;
 
   return (
     <main class="mx-auto max-w-5xl px-6 pb-10">
@@ -61,6 +68,7 @@ export function AudioAlignmentPage() {
             subtext="MP4 or MOV — the source video with the original dialogue"
           />
           {videoFileName && <p class="truncate text-center text-xs text-text-tertiary">{videoFileName}</p>}
+          {videoSourceErrorMessage.value && <p class="text-center text-xs text-danger">{videoSourceErrorMessage.value}</p>}
         </div>
 
         <div style={fadeUpEntranceStyle(1)} class="flex flex-col gap-2">
@@ -72,17 +80,21 @@ export function AudioAlignmentPage() {
             subtext="The audio that came back from your voice changer"
           />
           {audioFileName && <p class="truncate text-center text-xs text-text-tertiary">{audioFileName}</p>}
+          {voiceChangedSourceErrorMessage.value && <p class="text-center text-xs text-danger">{voiceChangedSourceErrorMessage.value}</p>}
         </div>
       </div>
 
       {(isLoadingVideoSource.value || isLoadingVoiceChangedSource.value) && (
         <p class="mt-4 text-center text-xs text-text-tertiary">Analyzing audio…</p>
       )}
-      {errorMessage.value && <p class="mt-4 text-center text-xs text-danger">{errorMessage.value}</p>}
 
       {bothSourcesLoaded && (
         <div class="mt-8 flex flex-col gap-6">
           <div style={fadeUpEntranceStyle(2)}>
+            <AlignmentWaveforms originalVideoEnvelope={originalEnvelope} voiceChangedAudioEnvelope={voiceChangedEnvelope} metrics={alignmentMetrics.value} />
+          </div>
+
+          <div style={fadeUpEntranceStyle(3)}>
             <Card>
               <SectionHeading
                 title="Silence threshold"
@@ -109,11 +121,11 @@ export function AudioAlignmentPage() {
             </Card>
           </div>
 
-          <div style={fadeUpEntranceStyle(3)}>
+          <div style={fadeUpEntranceStyle(4)}>
             <AlignmentMetricsPanel metrics={alignmentMetrics.value} />
           </div>
 
-          <div style={fadeUpEntranceStyle(4)} class="flex flex-col gap-3 rounded-lg border border-border-subtle bg-surface-raised p-5">
+          <div style={fadeUpEntranceStyle(5)} class="flex flex-col gap-3 rounded-lg border border-border-subtle bg-surface-raised p-5">
             <div class="flex flex-wrap items-center justify-end gap-3">
               <Button variant="ghost" onClick={resetAudioAlignmentSession}>
                 Reset
@@ -122,6 +134,7 @@ export function AudioAlignmentPage() {
                 {isExportingVideo.value ? 'Preparing video…' : 'Export video'}
               </Button>
             </div>
+            {exportErrorMessage.value && <p class="text-xs text-danger">{exportErrorMessage.value}</p>}
           </div>
         </div>
       )}

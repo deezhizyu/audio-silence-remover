@@ -6,6 +6,7 @@ import { SILENCE_CATEGORY_KEYS, type SilenceCategoryKey, type SilenceRegion } fr
 import { SILENCE_CATEGORY_COLOR_VARS } from './silenceCategoryPresentation';
 import { formatDurationClock } from '../utils/formatNumbers';
 import { clampNumber } from '../utils/clampNumber';
+import { drawWaveformSlice, type WaveformHighlightRegion } from './waveformDrawing';
 
 interface WaveformProps {
   envelope: SerializedAmplitudeEnvelope;
@@ -15,8 +16,6 @@ interface WaveformProps {
 }
 
 const WAVEFORM_HEIGHT_PIXELS = 160;
-const SILENCE_OVERLAY_ALPHA = 0.3;
-const REGION_BOUNDARY_ALPHA = 0.9;
 
 const MAGNIFIER_WIDTH_PIXELS = 260;
 const MAGNIFIER_WIDE_WIDTH_PIXELS = 340; // +80px, applied from the `xl` breakpoint up
@@ -50,84 +49,14 @@ function clampFraction(fraction: number): number {
   return Math.min(1, Math.max(0, fraction));
 }
 
-interface DrawSliceParams {
-  widthPixels: number;
-  heightPixels: number;
-  startSeconds: number;
-  endSeconds: number;
-  envelope: SerializedAmplitudeEnvelope;
-  regions: SilenceRegion[];
-  themeColors: ThemeColors;
-}
-
-/**
- * Draws bars + silence overlays + region boundary lines for an arbitrary [startSeconds, endSeconds] window into
- * a canvas already sized/scaled by the caller. Shared by the full-file waveform and the hover magnifier so the
- * two stay pixel-for-pixel consistent instead of duplicating the peak-computation logic.
- */
-function drawWaveformSlice(context: CanvasRenderingContext2D, params: DrawSliceParams): void {
-  const { widthPixels, heightPixels, startSeconds, endSeconds, envelope, regions, themeColors } = params;
-  const windowDurationSeconds = Math.max(endSeconds - startSeconds, 1e-6);
-  const secondsToX = (seconds: number) => ((seconds - startSeconds) / windowDurationSeconds) * widthPixels;
-
-  context.clearRect(0, 0, widthPixels, heightPixels);
-
-  for (const region of regions) {
-    const startX = secondsToX(region.startSeconds);
-    const endX = secondsToX(region.endSeconds);
-    if (endX < 0 || startX > widthPixels) continue;
-    context.fillStyle = themeColors.silenceByCategory[region.category];
-    context.globalAlpha = SILENCE_OVERLAY_ALPHA;
-    context.fillRect(startX, 0, Math.max(1, endX - startX), heightPixels);
-  }
-  context.globalAlpha = 1;
-
-  const rootMeanSquarePerWindow = envelope.rootMeanSquarePerWindow;
-  const sampleCount = rootMeanSquarePerWindow.length;
-  const centerY = heightPixels / 2;
-  const maxBarHalfHeight = heightPixels / 2 - Math.min(4, heightPixels / 8);
-  const startFraction = startSeconds / envelope.durationSeconds;
-  const endFraction = endSeconds / envelope.durationSeconds;
-
-  // Each pixel's window range is derived from the same continuous (pixel / width) fraction that `secondsToX`
-  // uses, rather than a fixed integer step size. A fixed step size under-covers the envelope on long files (its
-  // floor-rounding error accumulates across the canvas), which drifts the rendered waveform shape out of sync
-  // with the silence overlay the longer the file gets.
-  context.fillStyle = themeColors.waveform;
-  for (let pixelX = 0; pixelX < widthPixels; pixelX++) {
-    const fractionStart = startFraction + (pixelX / widthPixels) * (endFraction - startFraction);
-    const fractionEnd = startFraction + ((pixelX + 1) / widthPixels) * (endFraction - startFraction);
-    const windowStart = Math.max(0, Math.floor(fractionStart * sampleCount));
-    const windowEnd = Math.min(sampleCount, Math.max(windowStart + 1, Math.ceil(fractionEnd * sampleCount)));
-
-    let peakAmplitudeInWindow = 0;
-    for (let windowIndex = windowStart; windowIndex < windowEnd; windowIndex++) {
-      if (rootMeanSquarePerWindow[windowIndex] > peakAmplitudeInWindow) {
-        peakAmplitudeInWindow = rootMeanSquarePerWindow[windowIndex];
-      }
-    }
-
-    const normalizedPeak = Math.min(1, peakAmplitudeInWindow / envelope.peakAmplitude);
-    const barHalfHeight = Math.max(0.75, normalizedPeak * maxBarHalfHeight);
-    context.fillRect(pixelX, centerY - barHalfHeight, 1, barHalfHeight * 2);
-  }
-
-  // Crisp boundary lines on top of the bars so the exact start/end of each detected silence is unambiguous,
-  // rather than only readable from the soft translucent fill underneath.
-  context.globalAlpha = REGION_BOUNDARY_ALPHA;
-  context.lineWidth = 1.5;
-  for (const region of regions) {
-    context.strokeStyle = themeColors.silenceByCategory[region.category];
-    for (const boundarySeconds of [region.startSeconds, region.endSeconds]) {
-      const x = secondsToX(boundarySeconds);
-      if (x < -1 || x > widthPixels + 1) continue;
-      context.beginPath();
-      context.moveTo(x, 0);
-      context.lineTo(x, heightPixels);
-      context.stroke();
-    }
-  }
-  context.globalAlpha = 1;
+/** Maps this component's categorized `SilenceRegion`s onto the shared drawing function's plain,
+    category-agnostic highlight-region shape. */
+function toHighlightRegions(regions: SilenceRegion[], themeColors: ThemeColors): WaveformHighlightRegion[] {
+  return regions.map(region => ({
+    startSeconds: region.startSeconds,
+    endSeconds: region.endSeconds,
+    color: themeColors.silenceByCategory[region.category],
+  }));
 }
 
 /** Reads the playback time signal directly, so only this thin line re-renders on every animation frame. */
@@ -183,14 +112,15 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
       if (!context) return;
       context.scale(devicePixelRatio, devicePixelRatio);
 
+      const themeColors = getThemeColors(canvas);
       drawWaveformSlice(context, {
         widthPixels,
         heightPixels: WAVEFORM_HEIGHT_PIXELS,
         startSeconds: 0,
         endSeconds: envelope.durationSeconds,
         envelope,
-        regions,
-        themeColors: getThemeColors(canvas),
+        highlightRegions: toHighlightRegions(regions, themeColors),
+        waveformColor: themeColors.waveform,
       });
     };
 
@@ -258,8 +188,8 @@ export function Waveform({ envelope, regions, currentTimeSecondsSignal, onSeek }
       startSeconds,
       endSeconds,
       envelope,
-      regions,
-      themeColors,
+      highlightRegions: toHighlightRegions(regions, themeColors),
+      waveformColor: themeColors.waveform,
     });
 
     const windowDurationSeconds = Math.max(endSeconds - startSeconds, 1e-6);
