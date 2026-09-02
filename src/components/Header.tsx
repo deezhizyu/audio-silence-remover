@@ -46,7 +46,7 @@ export function Header() {
             <div class="flex h-8 w-8 items-center justify-center rounded-md bg-accent text-surface-base">
               <WaveformLogo />
             </div>
-            <h1 class="text-sm font-semibold tracking-wide text-text-primary">Silence Remover</h1>
+            <h1 class="text-sm font-semibold tracking-wide text-text-primary">Audio Tools</h1>
           </div>
 
           <nav class="flex items-center gap-1">

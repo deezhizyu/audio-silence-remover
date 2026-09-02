@@ -1,8 +1,8 @@
-# Silence Remover
+# Audio Tools
 
-A fully client-side web app that trims silence out of audio files in the browser — no server, no
-uploads. Detection, waveform rendering, and MP3/WAV export all run locally (an off-main-thread
-worker handles analysis).
+A fully client-side toolkit for editing audio files in the browser — no server, no uploads. It
+currently includes a silence remover and an audio alignment tool. Detection, waveform rendering,
+and MP3/WAV export all run locally (an off-main-thread worker handles analysis).
 
 ## Technologies
 
