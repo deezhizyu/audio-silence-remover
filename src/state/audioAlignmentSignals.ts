@@ -1,9 +1,11 @@
 import { computed, signal } from '@preact/signals';
 import { AlignmentPreviewPlaybackController, type AlignmentPlaybackSource } from '../audio/AlignmentPreviewPlaybackController';
 import { buildAudioBufferFromChannels } from '../audio/buildAudioBufferFromChannels';
+import { classifyAlignmentMediaFile } from '../audio/classifyAlignmentMediaFile';
 import { AudioAlignmentWorkerClient } from '../audio/worker/AudioAlignmentWorkerClient';
 import type { AlignmentBatchPairFailure, AlignmentBatchPairInput } from '../audio/worker/audioAlignmentWorkerMessages';
 import type { SerializedAmplitudeEnvelope } from '../audio/worker/workerMessages';
+import { clampZoomBoxCenterFraction, clampZoomBoxSizeFraction, type ZoomBoxCenterFraction } from '../utils/computeZoomBoxRect';
 import { downloadBlob } from '../utils/downloadBlob';
 
 export interface MatchedAlignmentPair {
@@ -12,18 +14,38 @@ export interface MatchedAlignmentPair {
   audioFile: File;
 }
 
+export interface AlignmentFileRow {
+  key: string;
+  videoFile: File | null;
+  audioFile: File | null;
+  isMatched: boolean;
+}
+
 function fileBaseName(file: File): string {
   return file.name.replace(/\.[^./\\]+$/, '').trim().toLowerCase();
 }
 
-export const originalVideoFiles = signal<File[]>([]);
-export const voiceChangedAudioFiles = signal<File[]>([]);
+/** The single unified drop zone's raw selection — every file dropped, video and audio mixed together. */
+export const selectedAlignmentFiles = signal<File[]>([]);
 
-/** Pairs matched by filename (ignoring extension and case), sorted for a stable, predictable order. */
+export const originalVideoFiles = computed<File[]>(() => selectedAlignmentFiles.value.filter(file => classifyAlignmentMediaFile(file) === 'video'));
+export const voiceChangedAudioFiles = computed<File[]>(() => selectedAlignmentFiles.value.filter(file => classifyAlignmentMediaFile(file) === 'audio'));
+
+/** Pairs the selection into video+audio matches. A lone video and a lone audio file are always paired
+    with each other regardless of filename — the common single-clip case shouldn't force a rename.
+    With more files than that, pairing falls back to matching filenames (ignoring extension and case),
+    sorted for a stable, predictable order. */
 export const matchedPairs = computed<MatchedAlignmentPair[]>(() => {
-  const audioFilesByBaseName = new Map(voiceChangedAudioFiles.value.map(file => [fileBaseName(file), file]));
+  const videoFiles = originalVideoFiles.value;
+  const audioFiles = voiceChangedAudioFiles.value;
+
+  if (videoFiles.length === 1 && audioFiles.length === 1) {
+    return [{ baseName: fileBaseName(videoFiles[0]), videoFile: videoFiles[0], audioFile: audioFiles[0] }];
+  }
+
+  const audioFilesByBaseName = new Map(audioFiles.map(file => [fileBaseName(file), file]));
   const pairs: MatchedAlignmentPair[] = [];
-  for (const videoFile of originalVideoFiles.value) {
+  for (const videoFile of videoFiles) {
     const audioFile = audioFilesByBaseName.get(fileBaseName(videoFile));
     if (audioFile) pairs.push({ baseName: fileBaseName(videoFile), videoFile, audioFile });
   }
@@ -31,20 +53,35 @@ export const matchedPairs = computed<MatchedAlignmentPair[]>(() => {
 });
 
 export const unmatchedVideoFiles = computed<File[]>(() => {
-  const matchedBaseNames = new Set(matchedPairs.value.map(pair => pair.baseName));
-  return originalVideoFiles.value.filter(file => !matchedBaseNames.has(fileBaseName(file)));
+  const matchedVideoFiles = new Set(matchedPairs.value.map(pair => pair.videoFile));
+  return originalVideoFiles.value.filter(file => !matchedVideoFiles.has(file));
 });
 
 export const unmatchedAudioFiles = computed<File[]>(() => {
-  const matchedBaseNames = new Set(matchedPairs.value.map(pair => pair.baseName));
-  return voiceChangedAudioFiles.value.filter(file => !matchedBaseNames.has(fileBaseName(file)));
+  const matchedAudioFiles = new Set(matchedPairs.value.map(pair => pair.audioFile));
+  return voiceChangedAudioFiles.value.filter(file => !matchedAudioFiles.has(file));
 });
+
+/** One row per pair or leftover file, in display order, for the merged video/audio file list. */
+export const alignmentFileRows = computed<AlignmentFileRow[]>(() => [
+  ...matchedPairs.value.map(pair => ({ key: `pair:${pair.baseName}`, videoFile: pair.videoFile, audioFile: pair.audioFile, isMatched: true })),
+  ...unmatchedVideoFiles.value.map(file => ({ key: `video:${file.name}`, videoFile: file, audioFile: null, isMatched: false })),
+  ...unmatchedAudioFiles.value.map(file => ({ key: `audio:${file.name}`, videoFile: null, audioFile: file, isMatched: false })),
+]);
 
 export const offsetSeconds = signal(0);
 
 /** The point (on the original video's timeline) the user last clicked to zoom in on — `null` means fully
     zoomed out, showing each waveform's full duration. */
 export const zoomCenterSeconds = signal<number | null>(null);
+
+const DEFAULT_ZOOM_BOX_CENTER_FRACTION: ZoomBoxCenterFraction = { x: 0.5, y: 0.5 };
+const DEFAULT_ZOOM_BOX_SIZE_FRACTION = 0.4;
+
+/** The zoom preview's crop box, as fractions of the video frame — reset whenever the reference pair
+    changes so a new clip always starts from a centered, moderately zoomed view. */
+export const zoomBoxCenterFraction = signal<ZoomBoxCenterFraction>(DEFAULT_ZOOM_BOX_CENTER_FRACTION);
+export const zoomBoxSizeFraction = signal(DEFAULT_ZOOM_BOX_SIZE_FRACTION);
 
 export const isLoadingPreview = signal(false);
 export const previewErrorMessage = signal<string | null>(null);
@@ -64,7 +101,8 @@ export const exportFailures = signal<AlignmentBatchPairFailure[]>([]);
 
 let activeWorkerClient: AudioAlignmentWorkerClient | null = null;
 let activePlaybackController: AlignmentPreviewPlaybackController | null = null;
-let loadedPreviewBaseName: string | null = null;
+let loadedPreviewVideoFile: File | null = null;
+let loadedPreviewAudioFile: File | null = null;
 
 function ensureWorkerClient(): AudioAlignmentWorkerClient {
   if (!activeWorkerClient) activeWorkerClient = new AudioAlignmentWorkerClient();
@@ -101,7 +139,8 @@ async function refreshPreviewFromFirstMatchedPair(): Promise<void> {
   const firstPair = matchedPairs.value[0] ?? null;
 
   if (!firstPair) {
-    loadedPreviewBaseName = null;
+    loadedPreviewVideoFile = null;
+    loadedPreviewAudioFile = null;
     activePlaybackController?.pause();
     activePlaybackController?.setVoiceChangedBuffer(null);
     if (previewVideoObjectUrl.value) URL.revokeObjectURL(previewVideoObjectUrl.value);
@@ -109,18 +148,23 @@ async function refreshPreviewFromFirstMatchedPair(): Promise<void> {
     originalVideoEnvelope.value = null;
     voiceChangedAudioEnvelope.value = null;
     zoomCenterSeconds.value = null;
+    zoomBoxCenterFraction.value = DEFAULT_ZOOM_BOX_CENTER_FRACTION;
+    zoomBoxSizeFraction.value = DEFAULT_ZOOM_BOX_SIZE_FRACTION;
     previewErrorMessage.value = null;
     return;
   }
 
-  if (firstPair.baseName === loadedPreviewBaseName) return;
-  loadedPreviewBaseName = firstPair.baseName;
+  if (firstPair.videoFile === loadedPreviewVideoFile && firstPair.audioFile === loadedPreviewAudioFile) return;
+  loadedPreviewVideoFile = firstPair.videoFile;
+  loadedPreviewAudioFile = firstPair.audioFile;
 
   previewErrorMessage.value = null;
   isLoadingPreview.value = true;
   originalVideoEnvelope.value = null;
   voiceChangedAudioEnvelope.value = null;
   zoomCenterSeconds.value = null;
+  zoomBoxCenterFraction.value = DEFAULT_ZOOM_BOX_CENTER_FRACTION;
+  zoomBoxSizeFraction.value = DEFAULT_ZOOM_BOX_SIZE_FRACTION;
   ensurePlaybackController().pause();
   ensurePlaybackController().setVoiceChangedBuffer(null);
 
@@ -140,13 +184,8 @@ async function refreshPreviewFromFirstMatchedPair(): Promise<void> {
   }
 }
 
-export function setOriginalVideoFiles(files: File[]): void {
-  originalVideoFiles.value = files;
-  void refreshPreviewFromFirstMatchedPair();
-}
-
-export function setVoiceChangedAudioFiles(files: File[]): void {
-  voiceChangedAudioFiles.value = files;
+export function setSelectedAlignmentFiles(files: File[]): void {
+  selectedAlignmentFiles.value = files;
   void refreshPreviewFromFirstMatchedPair();
 }
 
@@ -156,6 +195,16 @@ export function updateOffsetSeconds(seconds: number): void {
 
 export function setZoomCenterSeconds(seconds: number | null): void {
   zoomCenterSeconds.value = seconds;
+}
+
+export function setZoomBoxSizeFraction(sizeFraction: number): void {
+  const clampedSize = clampZoomBoxSizeFraction(sizeFraction);
+  zoomBoxSizeFraction.value = clampedSize;
+  zoomBoxCenterFraction.value = clampZoomBoxCenterFraction(zoomBoxCenterFraction.value, clampedSize);
+}
+
+export function setZoomBoxCenterFraction(center: ZoomBoxCenterFraction): void {
+  zoomBoxCenterFraction.value = clampZoomBoxCenterFraction(center, zoomBoxSizeFraction.value);
 }
 
 export function playOriginalAudio(fromSeconds?: number): void {
@@ -207,12 +256,14 @@ export function resetAudioAlignmentSession(): void {
   activePlaybackController?.pause();
   activePlaybackController?.setVoiceChangedBuffer(null);
   if (previewVideoObjectUrl.value) URL.revokeObjectURL(previewVideoObjectUrl.value);
-  loadedPreviewBaseName = null;
+  loadedPreviewVideoFile = null;
+  loadedPreviewAudioFile = null;
 
-  originalVideoFiles.value = [];
-  voiceChangedAudioFiles.value = [];
+  selectedAlignmentFiles.value = [];
   offsetSeconds.value = 0;
   zoomCenterSeconds.value = null;
+  zoomBoxCenterFraction.value = DEFAULT_ZOOM_BOX_CENTER_FRACTION;
+  zoomBoxSizeFraction.value = DEFAULT_ZOOM_BOX_SIZE_FRACTION;
   isLoadingPreview.value = false;
   previewErrorMessage.value = null;
   previewVideoObjectUrl.value = null;

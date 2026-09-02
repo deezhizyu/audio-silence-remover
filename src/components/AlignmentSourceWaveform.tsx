@@ -25,7 +25,8 @@ function easeOutCubic(t: number): number {
 /** An interactive per-source waveform: renders whatever `[windowStartSeconds, windowEndSeconds]` window
     the caller hands it (the full duration when zoomed out, a few seconds when zoomed in), animating
     smoothly between windows on change so a zoom-in/out reads as a single continuous motion rather than a
-    jump cut. Clicking anywhere reports back a position in this waveform's own timeline. */
+    jump cut. Clicking or dragging anywhere reports back a position in this waveform's own timeline,
+    continuously while dragging so scrubbing reads as one smooth motion. */
 export function AlignmentSourceWaveform({
   label,
   envelope,
@@ -144,11 +145,29 @@ export function AlignmentSourceWaveform({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [envelope, highlightRegions, playheadSeconds]);
 
-  const handleClick = (event: JSX.TargetedMouseEvent<HTMLDivElement>) => {
-    const widthPixels = containerRef.current?.clientWidth ?? 1;
+  const isDraggingRef = useRef(false);
+
+  const emitSeekFromClientX = (clientX: number) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    const widthPixels = rect?.width ?? 1;
     const { startSeconds, endSeconds } = renderedWindowRef.current;
-    const fraction = clampNumber(event.offsetX / widthPixels, 0, 1);
+    const fraction = clampNumber(((clientX - (rect?.left ?? 0)) / widthPixels), 0, 1);
     onSeek(startSeconds + fraction * (endSeconds - startSeconds));
+  };
+
+  const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLDivElement>) => {
+    isDraggingRef.current = true;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    emitSeekFromClientX(event.clientX);
+  };
+
+  const handlePointerMove = (event: JSX.TargetedPointerEvent<HTMLDivElement>) => {
+    if (!isDraggingRef.current) return;
+    emitSeekFromClientX(event.clientX);
+  };
+
+  const handlePointerUp = () => {
+    isDraggingRef.current = false;
   };
 
   return (
@@ -159,8 +178,11 @@ export function AlignmentSourceWaveform({
       </div>
       <div
         ref={containerRef}
-        onClick={handleClick}
-        class="relative cursor-pointer overflow-hidden rounded-lg border border-border-subtle bg-surface-overlay transition-colors duration-200 hover:border-border-strong"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        class="relative cursor-grab overflow-hidden rounded-lg border border-border-subtle bg-surface-overlay transition-colors duration-200 hover:border-border-strong active:cursor-grabbing"
       >
         <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: `${WAVEFORM_HEIGHT_PIXELS}px` }} />
       </div>

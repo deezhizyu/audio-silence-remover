@@ -9,10 +9,10 @@ import {
   playbackCurrentTimeSeconds,
   playOriginalAudio,
   playVoiceChangedAudio,
-  previewVideoObjectUrl,
   seekPreview,
   updateOffsetSeconds,
 } from '../state/audioAlignmentSignals';
+import { AlignmentZoomableVideo } from './AlignmentZoomableVideo';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
 import { RangeControl } from './ui/RangeControl';
@@ -35,7 +35,6 @@ export function AlignmentPlaybackPreview() {
 
   const activeSource = activePlaybackSource.value;
   const isPlaying = isPlaybackPlaying.value;
-  const videoSrc = previewVideoObjectUrl.value;
 
   const handleToggleOriginal = () => {
     if (activeSource === 'original' && isPlaying) {
@@ -65,17 +64,17 @@ export function AlignmentPlaybackPreview() {
   return (
     <Card>
       <SectionHeading title="Preview" description="Plays the first matched pair — switch between original and aligned audio to compare, and drag the offset until they line up." />
-      <video
-        ref={videoElementRef}
-        src={videoSrc ?? undefined}
-        class="mx-auto mt-4 block max-h-[420px] w-auto max-w-full rounded-lg border border-border-subtle bg-black"
-        playsInline
-        muted
-      />
+      <div class="mt-4">
+        <AlignmentZoomableVideo videoElementRef={videoElementRef} />
+      </div>
 
       <div class="mt-4 flex flex-wrap items-center gap-2">
-        <Button variant="ghost" onClick={handleRestart}>
-          ⏮ Restart
+        <Button variant="secondary" onClick={handleRestart}>
+          <svg viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+            <rect x="4" y="4" width="2" height="12" rx="1" />
+            <path d="M16 4.6a1 1 0 0 0-1.53-.85l-7.7 4.9a1.5 1.5 0 0 0 0 2.5l7.7 4.9A1 1 0 0 0 16 15V4.6Z" />
+          </svg>
+          Restart
         </Button>
         <Button variant={activeSource === 'original' && isPlaying ? 'primary' : 'secondary'} onClick={handleToggleOriginal}>
           {activeSource === 'original' && isPlaying ? 'Pause' : 'Play'} original

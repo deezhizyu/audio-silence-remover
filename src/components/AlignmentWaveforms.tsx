@@ -11,7 +11,7 @@ interface AlignmentWaveformsProps {
   voiceChangedAudioEnvelope: SerializedAmplitudeEnvelope;
 }
 
-const ZOOM_WINDOW_SECONDS = 0.5;
+const ZOOM_WINDOW_SECONDS = 0.15;
 
 /** Waveforms for the reference (first matched) pair only — batch export applies the same offset to
     every other pair without a per-pair waveform check. */
@@ -48,7 +48,7 @@ export function AlignmentWaveforms({ originalVideoEnvelope, voiceChangedAudioEnv
   return (
     <Card>
       <div class="flex items-start justify-between gap-3">
-        <SectionHeading title="Waveforms" description="Click a point on either waveform to zoom in and line them up by ear and eye." />
+        <SectionHeading title="Waveforms" description="Click or drag across either waveform to zoom in and line them up by ear and eye." />
         {isZoomed && (
           <Button variant="ghost" onClick={() => setZoomCenterSeconds(null)}>
             Zoom out
