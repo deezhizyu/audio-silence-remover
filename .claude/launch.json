@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "silence-remover-dev",
+      "name": "audio-tools-dev",
       "runtimeExecutable": "/bin/zsh",
       "runtimeArgs": ["-c", "source ~/.nvm/nvm.sh && pnpm dev"],
       "port": 5173

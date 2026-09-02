@@ -1,8 +1,9 @@
-# Silence Remover
+# Audio Tools
 
-A fully client-side web app that removes silence from audio files — right in your browser. Short,
-medium, and long pauses are detected automatically, then each category is yours to fine-tune
-(threshold, cut length, and more). Nothing is uploaded; decoding, analysis, and export all run
+A fully client-side toolkit for editing audio files — right in your browser. It currently includes
+a silence remover (short, medium, and long pauses are detected automatically, then each category is
+yours to fine-tune — threshold, cut length, and more) and an audio alignment tool for lining up
+multiple takes of the same recording. Nothing is uploaded; decoding, analysis, and export all run
 locally.
 
 [![Preact](https://img.shields.io/badge/Preact-673AB8?logo=preact&logoColor=white)](https://preactjs.com)

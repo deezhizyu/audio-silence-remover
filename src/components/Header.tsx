@@ -1,7 +1,7 @@
 import { useLocation } from 'preact-iso';
 import { BASE_PATH } from '../utils/basePath';
 
-const REPOSITORY_URL = 'https://github.com/deezhizyu/audio-silence-remover';
+const REPOSITORY_URL = 'https://github.com/deezhizyu/audio-tools';
 
 const NAV_LINK_CLASS =
   'rounded-md px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-200 hover:text-text-primary';
@@ -40,37 +40,35 @@ export function Header() {
 
   return (
     <header class="border-b border-border-subtle">
-      <div class="flex items-center justify-between gap-3 px-6 py-5">
-        <div class="flex items-center gap-6">
-          <div class="flex items-center gap-3">
-            <div class="flex h-8 w-8 items-center justify-center rounded-md bg-accent text-surface-base">
-              <WaveformLogo />
-            </div>
-            <h1 class="text-sm font-semibold tracking-wide text-text-primary">Silence Remover</h1>
+      <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-6 py-5">
+        <div class="flex items-center gap-3">
+          <div class="flex h-8 w-8 items-center justify-center rounded-md bg-accent text-surface-base">
+            <WaveformLogo />
           </div>
-
-          <nav class="flex items-center gap-1">
-            <a
-              href={silenceRemoverHref}
-              class={`${NAV_LINK_CLASS} ${normalizePath(path) === normalizePath(silenceRemoverHref) ? NAV_LINK_ACTIVE_CLASS : ''}`}
-            >
-              Silence Remover
-            </a>
-            <a
-              href={alignmentHref}
-              class={`${NAV_LINK_CLASS} ${normalizePath(path) === normalizePath(alignmentHref) ? NAV_LINK_ACTIVE_CLASS : ''}`}
-            >
-              Audio Alignment
-            </a>
-          </nav>
+          <h1 class="text-sm font-semibold tracking-wide text-text-primary">Audio Tools</h1>
         </div>
+
+        <nav class="flex items-center gap-1">
+          <a
+            href={silenceRemoverHref}
+            class={`${NAV_LINK_CLASS} ${normalizePath(path) === normalizePath(silenceRemoverHref) ? NAV_LINK_ACTIVE_CLASS : ''}`}
+          >
+            Silence Remover
+          </a>
+          <a
+            href={alignmentHref}
+            class={`${NAV_LINK_CLASS} ${normalizePath(path) === normalizePath(alignmentHref) ? NAV_LINK_ACTIVE_CLASS : ''}`}
+          >
+            Audio Alignment
+          </a>
+        </nav>
 
         <a
           href={REPOSITORY_URL}
           target="_blank"
           rel="noopener noreferrer"
           aria-label="View source on GitHub"
-          class="flex h-8 w-8 items-center justify-center rounded-md text-text-secondary transition-colors duration-200 hover:text-text-primary"
+          class="flex h-8 w-8 items-center justify-center rounded-md text-text-secondary transition-colors duration-200 hover:text-text-primary justify-self-end"
         >
           <GitHubIcon />
         </a>
