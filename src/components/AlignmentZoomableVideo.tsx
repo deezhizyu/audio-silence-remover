@@ -1,6 +1,6 @@
 import type { RefObject } from 'preact';
 import type { JSX } from 'preact';
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { computeZoomBoxPixelRect } from '../utils/computeZoomBoxRect';
 import {
   previewVideoObjectUrl,
@@ -16,19 +16,21 @@ interface AlignmentZoomableVideoProps {
 
 const WHEEL_ZOOM_STEP_FRACTION = 0.03;
 
-/** The left pane is the reference video as before, with a grey box overlay marking the zoomed region
-    (shown only while hovering either pane). The right pane is a canvas continuously mirroring that
-    cropped region from the same underlying `<video>` element — same idea as the waveform hover
-    magnifier (`Waveform.tsx`'s `drawMagnifier`), just re-targeted at video frames instead of waveform
-    bars, so there's only ever one real video decode. Scroll zooms (either pane); dragging the right
-    pane pans the box. */
+/** The left pane is the reference video as before, with a grey box overlay marking the zoomed region —
+    shown only while the pointer is directly over the video or the canvas, not the gap between them. The
+    right pane is a canvas continuously mirroring that cropped region from the same underlying `<video>`
+    element — same idea as the waveform hover magnifier (`Waveform.tsx`'s `drawMagnifier`), just
+    re-targeted at video frames instead of waveform bars, so there's only ever one real video decode.
+    Scrolling over either pane zooms; dragging either pane pans the box — on the left that's a 1:1 move
+    across the full frame, on the right it's scaled up by how zoomed in the box already is. */
 export function AlignmentZoomableVideo({ videoElementRef }: AlignmentZoomableVideoProps) {
   const leftContainerRef = useRef<HTMLDivElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameIdRef = useRef<number | null>(null);
-  const isDraggingRef = useRef(false);
+  const draggingPaneRef = useRef<'left' | 'right' | null>(null);
   const lastPointerPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const [isHovering, setIsHovering] = useState(false);
 
   const videoSrc = previewVideoObjectUrl.value;
   const boxCenter = zoomBoxCenterFraction.value;
@@ -98,36 +100,40 @@ export function AlignmentZoomableVideo({ videoElementRef }: AlignmentZoomableVid
     };
   }, [videoElementRef]);
 
-  const handleWheel = (event: JSX.TargetedWheelEvent<HTMLDivElement>) => {
+  const handleWheel = (event: JSX.TargetedWheelEvent<HTMLElement>) => {
     event.preventDefault();
     const direction = event.deltaY < 0 ? -1 : 1;
     setZoomBoxSizeFraction(zoomBoxSizeFraction.value + direction * WHEEL_ZOOM_STEP_FRACTION);
   };
 
-  const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>) => {
-    isDraggingRef.current = true;
+  const handlePointerDown = (pane: 'left' | 'right') => (event: JSX.TargetedPointerEvent<HTMLElement>) => {
+    draggingPaneRef.current = pane;
     event.currentTarget.setPointerCapture(event.pointerId);
     lastPointerPositionRef.current = { x: event.clientX, y: event.clientY };
   };
 
-  const handlePointerMove = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>) => {
-    if (!isDraggingRef.current || !lastPointerPositionRef.current) return;
-    const canvasContainer = canvasContainerRef.current;
-    if (!canvasContainer) return;
+  // On the left pane, the video's own rendered width/height *is* the full frame, so a pointer move maps
+  // 1:1 to a frame fraction. On the right pane, the canvas only shows the zoomed box's own span, so the
+  // same pointer movement covers a much smaller frame fraction — scaled down by the box's current size.
+  const handlePointerMove = (event: JSX.TargetedPointerEvent<HTMLElement>) => {
+    const pane = draggingPaneRef.current;
+    if (!pane || !lastPointerPositionRef.current) return;
+    const referenceElement = pane === 'left' ? videoElementRef.current : canvasContainerRef.current;
+    if (!referenceElement) return;
 
     const deltaXPixels = event.clientX - lastPointerPositionRef.current.x;
     const deltaYPixels = event.clientY - lastPointerPositionRef.current.y;
     lastPointerPositionRef.current = { x: event.clientX, y: event.clientY };
 
-    const sizeFraction = zoomBoxSizeFraction.value;
-    const deltaXFraction = (deltaXPixels / Math.max(1, canvasContainer.clientWidth)) * sizeFraction;
-    const deltaYFraction = (deltaYPixels / Math.max(1, canvasContainer.clientHeight)) * sizeFraction;
+    const scaleFraction = pane === 'left' ? 1 : zoomBoxSizeFraction.value;
+    const deltaXFraction = (deltaXPixels / Math.max(1, referenceElement.clientWidth)) * scaleFraction;
+    const deltaYFraction = (deltaYPixels / Math.max(1, referenceElement.clientHeight)) * scaleFraction;
     const currentCenter = zoomBoxCenterFraction.value;
     setZoomBoxCenterFraction({ x: currentCenter.x + deltaXFraction, y: currentCenter.y + deltaYFraction });
   };
 
   const handlePointerUp = () => {
-    isDraggingRef.current = false;
+    draggingPaneRef.current = null;
     lastPointerPositionRef.current = null;
   };
 
@@ -139,17 +145,27 @@ export function AlignmentZoomableVideo({ videoElementRef }: AlignmentZoomableVid
   };
 
   return (
-    <div class="group flex flex-col items-center justify-center gap-4 sm:flex-row" onWheel={handleWheel}>
+    <div class="flex flex-col items-center justify-center gap-4 sm:flex-row">
       <div ref={leftContainerRef} class="relative w-fit">
         <video
           ref={videoElementRef}
           src={videoSrc ?? undefined}
-          class="block max-h-[420px] w-auto max-w-full rounded-lg border border-border-subtle bg-black"
+          draggable={false}
+          class="block max-h-[420px] w-auto max-w-full touch-none rounded-lg border border-border-subtle bg-black"
           playsInline
           muted
+          onMouseEnter={() => setIsHovering(true)}
+          onMouseLeave={() => setIsHovering(false)}
+          onWheel={handleWheel}
+          onPointerDown={handlePointerDown('left')}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
         />
         <div
-          class="pointer-events-none absolute rounded-sm border-2 border-white/70 bg-white/10 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+          class={`pointer-events-none absolute rounded-sm border-2 border-white/70 bg-white/10 transition-opacity duration-200 ${
+            isHovering ? 'opacity-100' : 'opacity-0'
+          }`}
           style={boxStyle}
         />
       </div>
@@ -158,7 +174,10 @@ export function AlignmentZoomableVideo({ videoElementRef }: AlignmentZoomableVid
         <canvas
           ref={canvasRef}
           class="block h-full w-full touch-none"
-          onPointerDown={handlePointerDown}
+          onMouseEnter={() => setIsHovering(true)}
+          onMouseLeave={() => setIsHovering(false)}
+          onWheel={handleWheel}
+          onPointerDown={handlePointerDown('right')}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}

@@ -5,6 +5,7 @@ import { Dropzone } from '../components/Dropzone';
 import { Button } from '../components/ui/Button';
 import { fadeUpEntranceStyle } from '../utils/fadeUpEntranceStyle';
 import {
+  appendSelectedAlignmentFiles,
   exportBatch,
   exportErrorMessage,
   exportFailures,
@@ -14,7 +15,6 @@ import {
   originalVideoEnvelope,
   resetAudioAlignmentSession,
   selectedAlignmentFiles,
-  setSelectedAlignmentFiles,
   voiceChangedAudioEnvelope,
 } from '../state/audioAlignmentSignals';
 
@@ -41,7 +41,7 @@ export function AudioAlignmentPage() {
 
       <div style={fadeUpEntranceStyle(0)}>
         <Dropzone
-          onFilesSelected={setSelectedAlignmentFiles}
+          onFilesSelected={appendSelectedAlignmentFiles}
           multiple
           accept="video/mp4,video/quicktime,.mp4,.mov,audio/*"
           heading="Drop your videos and voice-changed audio here"

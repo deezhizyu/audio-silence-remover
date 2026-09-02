@@ -189,6 +189,25 @@ export function setSelectedAlignmentFiles(files: File[]): void {
   void refreshPreviewFromFirstMatchedPair();
 }
 
+function describeFileIdentity(file: File): string {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+/** Adds to the current selection rather than replacing it — repeated drops/picks build up one batch.
+    Files already present (by name/size/last-modified) are skipped so re-dropping the same file doesn't
+    create a duplicate row. */
+export function appendSelectedAlignmentFiles(files: File[]): void {
+  const existingFileIdentities = new Set(selectedAlignmentFiles.value.map(describeFileIdentity));
+  const newFiles = files.filter(file => !existingFileIdentities.has(describeFileIdentity(file)));
+  selectedAlignmentFiles.value = [...selectedAlignmentFiles.value, ...newFiles];
+  void refreshPreviewFromFirstMatchedPair();
+}
+
+export function removeSelectedAlignmentFile(file: File): void {
+  selectedAlignmentFiles.value = selectedAlignmentFiles.value.filter(existingFile => existingFile !== file);
+  void refreshPreviewFromFirstMatchedPair();
+}
+
 export function updateOffsetSeconds(seconds: number): void {
   offsetSeconds.value = seconds;
 }
