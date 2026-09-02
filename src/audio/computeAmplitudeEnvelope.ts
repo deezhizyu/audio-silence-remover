@@ -18,8 +18,12 @@ const ENVELOPE_WINDOW_SECONDS = 0.01;
  */
 const REFERENCE_AMPLITUDE_PERCENTILE = 0.95;
 
-export function computeAmplitudeEnvelope(channelData: Float32Array<ArrayBuffer>[], sampleRate: number): AmplitudeEnvelope {
-  const windowSizeInFrames = Math.max(1, Math.round(ENVELOPE_WINDOW_SECONDS * sampleRate));
+export function computeAmplitudeEnvelope(
+  channelData: Float32Array<ArrayBuffer>[],
+  sampleRate: number,
+  windowSizeSeconds: number = ENVELOPE_WINDOW_SECONDS,
+): AmplitudeEnvelope {
+  const windowSizeInFrames = Math.max(1, Math.round(windowSizeSeconds * sampleRate));
   const numberOfChannels = channelData.length;
   const numberOfFrames = channelData[0]?.length ?? 0;
   const numberOfWindows = Math.max(1, Math.ceil(numberOfFrames / windowSizeInFrames));

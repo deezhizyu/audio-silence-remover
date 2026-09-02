@@ -3,11 +3,22 @@ import type { JSX } from 'preact';
 import { Button } from './ui/Button';
 
 interface DropzoneProps {
-  onFileSelected: (file: File) => void;
+  onFilesSelected: (files: File[]) => void;
+  multiple?: boolean;
   disabled?: boolean;
+  accept?: string;
+  heading?: string;
+  subtext?: string;
 }
 
-export function Dropzone({ onFileSelected, disabled = false }: DropzoneProps) {
+export function Dropzone({
+  onFilesSelected,
+  multiple = false,
+  disabled = false,
+  accept = 'audio/*',
+  heading = 'Drop an audio file here',
+  subtext = 'or choose a file — everything runs on this device, nothing is uploaded',
+}: DropzoneProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
 
@@ -21,13 +32,14 @@ export function Dropzone({ onFileSelected, disabled = false }: DropzoneProps) {
     setIsDraggingOver(false);
     if (disabled) return;
 
-    const droppedFile = event.dataTransfer?.files?.[0];
-    if (droppedFile) onFileSelected(droppedFile);
+    const droppedFiles = event.dataTransfer?.files;
+    if (!droppedFiles || droppedFiles.length === 0) return;
+    onFilesSelected(multiple ? Array.from(droppedFiles) : [droppedFiles[0]]);
   };
 
   const handleFileInputChange = (event: JSX.TargetedEvent<HTMLInputElement>) => {
-    const selectedFile = event.currentTarget.files?.[0];
-    if (selectedFile) onFileSelected(selectedFile);
+    const selectedFiles = event.currentTarget.files;
+    if (selectedFiles && selectedFiles.length > 0) onFilesSelected(Array.from(selectedFiles));
     event.currentTarget.value = '';
   };
 
@@ -54,14 +66,14 @@ export function Dropzone({ onFileSelected, disabled = false }: DropzoneProps) {
       </div>
 
       <div>
-        <p class="text-sm font-medium text-text-primary">Drop an audio file here</p>
-        <p class="mt-1 text-xs text-text-tertiary">or choose a file — everything runs on this device, nothing is uploaded</p>
+        <p class="text-sm font-medium text-text-primary">{heading}</p>
+        <p class="mt-1 text-xs text-text-tertiary">{subtext}</p>
       </div>
 
       <Button variant="primary" onClick={() => fileInputRef.current?.click()} disabled={disabled}>
-        Choose file
+        {multiple ? 'Choose files' : 'Choose file'}
       </Button>
-      <input ref={fileInputRef} type="file" accept="audio/*" class="hidden" onChange={handleFileInputChange} disabled={disabled} />
+      <input ref={fileInputRef} type="file" accept={accept} multiple={multiple} class="hidden" onChange={handleFileInputChange} disabled={disabled} />
     </div>
   );
 }
