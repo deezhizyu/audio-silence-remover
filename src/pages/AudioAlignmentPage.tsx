@@ -1,4 +1,5 @@
 import { AlignmentFileList } from '../components/AlignmentFileList';
+import { AlignmentHero } from '../components/AlignmentHero';
 import { AlignmentPlaybackPreview } from '../components/AlignmentPlaybackPreview';
 import { AlignmentWaveforms } from '../components/AlignmentWaveforms';
 import { Dropzone } from '../components/Dropzone';
@@ -30,14 +31,7 @@ export function AudioAlignmentPage() {
 
   return (
     <main class="mx-auto max-w-5xl px-6 pb-10">
-      <div class="mx-auto mt-6 max-w-2xl px-6 pb-8 pt-14 text-center">
-        <h1 class="text-3xl font-bold tracking-tight text-text-primary sm:text-4xl">Audio Alignment</h1>
-        <p class="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-text-secondary">
-          Fix the padding an AI voice changer adds to your dialogue. Drop your original videos and their
-          voice-changed audio together — tune one offset against a preview, then export with that offset
-          applied to every pair.
-        </p>
-      </div>
+      <AlignmentHero />
 
       <div style={fadeUpEntranceStyle(0)}>
         <Dropzone
