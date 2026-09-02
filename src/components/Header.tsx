@@ -1,7 +1,7 @@
 import { useLocation } from 'preact-iso';
 import { BASE_PATH } from '../utils/basePath';
 
-const REPOSITORY_URL = 'https://github.com/deezhizyu/audio-silence-remover';
+const REPOSITORY_URL = 'https://github.com/deezhizyu/audio-tools';
 
 const NAV_LINK_CLASS =
   'rounded-md px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-200 hover:text-text-primary';
