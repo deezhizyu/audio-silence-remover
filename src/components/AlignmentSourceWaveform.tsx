@@ -12,11 +12,29 @@ interface AlignmentSourceWaveformProps {
   highlightRegions: WaveformHighlightRegion[];
   /** In this waveform's own timeline (the caller converts from the shared/original one) — `null` hides the line. */
   playheadSeconds: number | null;
+  /** Fires on every pointer move during a drag (and once on press) — playhead-only, never changes the
+      visible window. */
   onSeek: (secondsInThisWindow: number) => void;
+  /** Fires while dragging, only once the cursor nears either edge of the current window — pans the
+      window by this many seconds (signed, in this waveform's own timeline). */
+  onPan: (deltaSecondsInThisWindow: number) => void;
+  /** Fires once, on release — the caller uses this to (re-)center the window on the final position,
+      deferred from every intermediate tick so a drag doesn't fight its own zoom animation. */
+  onSeekEnd: (secondsInThisWindow: number) => void;
+  /** True while a pan gesture (on this waveform or its sibling, sharing the same zoom center) is live —
+      skips the eased zoom-transition animation so panned window updates snap instantly instead of
+      racing a 250ms tween on every tick. */
+  skipZoomAnimation: boolean;
 }
 
 const WAVEFORM_HEIGHT_PIXELS = 120;
 const ZOOM_ANIMATION_DURATION_MILLISECONDS = 250;
+
+// How close to either edge (as a fraction of the container width) a drag has to get before the window
+// starts panning, and how much of the window's own duration the fastest edge-panning moves per tick
+// (right at the very edge) — scaled by depth into the margin so panning ramps up rather than snapping on.
+const EDGE_PAN_MARGIN_FRACTION = 0.15;
+const EDGE_PAN_MAX_FRACTION_OF_WINDOW_PER_TICK = 0.08;
 
 function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;
@@ -25,8 +43,10 @@ function easeOutCubic(t: number): number {
 /** An interactive per-source waveform: renders whatever `[windowStartSeconds, windowEndSeconds]` window
     the caller hands it (the full duration when zoomed out, a few seconds when zoomed in), animating
     smoothly between windows on change so a zoom-in/out reads as a single continuous motion rather than a
-    jump cut. Clicking or dragging anywhere reports back a position in this waveform's own timeline,
-    continuously while dragging so scrubbing reads as one smooth motion. */
+    jump cut — unless `skipZoomAnimation` is set, in which case the window snaps immediately (used while
+    a drag is actively panning it, so panning doesn't fight the animation). Clicking or dragging anywhere
+    reports back a position in this waveform's own timeline via `onSeek`/`onPan`/`onSeekEnd` — see their
+    docs above for the split. */
 export function AlignmentSourceWaveform({
   label,
   envelope,
@@ -35,6 +55,9 @@ export function AlignmentSourceWaveform({
   highlightRegions,
   playheadSeconds,
   onSeek,
+  onPan,
+  onSeekEnd,
+  skipZoomAnimation,
 }: AlignmentSourceWaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -90,9 +113,18 @@ export function AlignmentSourceWaveform({
 
   // Animates the *rendered* window from wherever it currently is to the new target window whenever the
   // caller hands us a new one (a zoom in/out or an offset-slider-driven shift) — this is what makes the
-  // zoom read as smooth motion rather than an instant jump.
+  // zoom read as smooth motion rather than an instant jump. While `skipZoomAnimation` is set (an active
+  // pan gesture is nudging the window every tick), that tween is skipped entirely in favor of an instant
+  // snap, since re-triggering a 250ms ease on every pointer-move tick is exactly what made dragging feel
+  // laggy — the eased transition is only appropriate for a single discrete jump.
   useEffect(() => {
     if (zoomAnimationFrameIdRef.current !== null) cancelAnimationFrame(zoomAnimationFrameIdRef.current);
+
+    if (skipZoomAnimation) {
+      renderedWindowRef.current = { startSeconds: windowStartSeconds, endSeconds: windowEndSeconds };
+      draw();
+      return;
+    }
 
     const startingWindow = { ...renderedWindowRef.current };
     const targetWindow = { startSeconds: windowStartSeconds, endSeconds: windowEndSeconds };
@@ -119,9 +151,10 @@ export function AlignmentSourceWaveform({
     return () => {
       if (zoomAnimationFrameIdRef.current !== null) cancelAnimationFrame(zoomAnimationFrameIdRef.current);
     };
-    // Only the window bounds should trigger the animated transition — see the redraw-only effect below
+    // Only the window bounds (and whether we're currently skipping the animation) should trigger this —
+    // see the redraw-only effect below for everything else
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [windowStartSeconds, windowEndSeconds]);
+  }, [windowStartSeconds, windowEndSeconds, skipZoomAnimation]);
 
   // Immediate (non-animated) redraw for anything that isn't a window change: new highlight regions from a
   // trim-slider drag, a new playhead tick during normal playback, or a resize.
@@ -147,27 +180,48 @@ export function AlignmentSourceWaveform({
 
   const isDraggingRef = useRef(false);
 
-  const emitSeekFromClientX = (clientX: number) => {
+  const secondsFromClientX = (clientX: number): number => {
     const rect = containerRef.current?.getBoundingClientRect();
     const widthPixels = rect?.width ?? 1;
     const { startSeconds, endSeconds } = renderedWindowRef.current;
-    const fraction = clampNumber(((clientX - (rect?.left ?? 0)) / widthPixels), 0, 1);
-    onSeek(startSeconds + fraction * (endSeconds - startSeconds));
+    const fraction = clampNumber((clientX - (rect?.left ?? 0)) / widthPixels, 0, 1);
+    return startSeconds + fraction * (endSeconds - startSeconds);
+  };
+
+  /** How far past the edge margin the cursor is (0 = right at the margin's inner boundary, 1 = right at
+      the container edge), signed toward the edge it's near — 0 if not within either margin. */
+  const edgePanDepth = (clientX: number): number => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    const widthPixels = rect?.width ?? 1;
+    const fraction = clampNumber((clientX - (rect?.left ?? 0)) / widthPixels, 0, 1);
+
+    if (fraction < EDGE_PAN_MARGIN_FRACTION) return -(EDGE_PAN_MARGIN_FRACTION - fraction) / EDGE_PAN_MARGIN_FRACTION;
+    if (fraction > 1 - EDGE_PAN_MARGIN_FRACTION) return (fraction - (1 - EDGE_PAN_MARGIN_FRACTION)) / EDGE_PAN_MARGIN_FRACTION;
+    return 0;
   };
 
   const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLDivElement>) => {
     isDraggingRef.current = true;
     event.currentTarget.setPointerCapture(event.pointerId);
-    emitSeekFromClientX(event.clientX);
+    onSeek(secondsFromClientX(event.clientX));
   };
 
   const handlePointerMove = (event: JSX.TargetedPointerEvent<HTMLDivElement>) => {
     if (!isDraggingRef.current) return;
-    emitSeekFromClientX(event.clientX);
+    onSeek(secondsFromClientX(event.clientX));
+
+    const isCurrentlyZoomed = windowEndSeconds - windowStartSeconds < envelope.durationSeconds;
+    if (!isCurrentlyZoomed) return;
+
+    const depth = edgePanDepth(event.clientX);
+    if (depth === 0) return;
+    const windowDurationSeconds = renderedWindowRef.current.endSeconds - renderedWindowRef.current.startSeconds;
+    onPan(depth * EDGE_PAN_MAX_FRACTION_OF_WINDOW_PER_TICK * windowDurationSeconds);
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (event: JSX.TargetedPointerEvent<HTMLDivElement>) => {
     isDraggingRef.current = false;
+    onSeekEnd(secondsFromClientX(event.clientX));
   };
 
   return (
